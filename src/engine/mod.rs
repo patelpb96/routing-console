@@ -44,6 +44,9 @@ pub struct EngineReport {
 /// restart, so a crash between the engine sending and the app committing loses nothing. The app
 /// recognises a repeat because the request row already holds a result.
 pub trait RoutingEngine: Send + Sync {
+    /// Idempotent per `request_id`: starting a request the engine already holds does nothing
+    /// (no second plan, timer or report). The app relies on this to hand every pending request
+    /// over again on start, in case a crash came between committing it and the first `start`.
     fn start(&self, request: EngineRequest) -> Result<(), AppError>;
     /// The app has committed (or deliberately refused) this report.
     fn acknowledge(&self, report: &EngineReport) -> Result<(), AppError>;

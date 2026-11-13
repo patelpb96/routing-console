@@ -253,10 +253,13 @@ impl RoutingEngine for Simulator {
             (Some(_), EngineResult::Match(c)) => ("match", Some(c)),
             (Some(_), EngineResult::NoMatch) => ("no_match", None),
         };
-        self.store.transaction(|tx| {
-            tx.execute(
+        // `request_id` is the table's primary key: a request already held keeps its first plan,
+        // and is not armed again (its timer, if any, is already set or re-armed on start).
+        let inserted = self.store.transaction(|tx| {
+            Ok(tx.execute(
                 "INSERT INTO sim_schedule (request_id, task_id, due_at_ms, outcome, contributor_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(request_id) DO NOTHING",
                 params![
                     request.request_id,
                     request.task_id,
@@ -264,9 +267,11 @@ impl RoutingEngine for Simulator {
                     outcome,
                     contributor
                 ],
-            )?;
-            Ok(())
+            )?)
         })?;
+        if inserted == 0 {
+            return Ok(());
+        }
         if let Some(due) = due {
             let report = EngineReport {
                 request_id: request.request_id,
@@ -294,5 +299,51 @@ impl RoutingEngine for Simulator {
 
     fn is_current(&self, report: &EngineReport) -> bool {
         report.epoch == self.epoch.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Area, Priority};
+    use crate::engine::Candidate;
+
+    #[tokio::test(start_paused = true)]
+    async fn start_twice_for_the_same_request_gives_one_row_one_timer_one_report() {
+        let store = Store::open_in_memory().unwrap();
+        let (reports, mut incoming) = unbounded_channel();
+        let sim = Simulator::new(store.clone(), Clock::system(), 42, reports).unwrap();
+        sim.set_scenario(1, Scenario::FastMatch).unwrap();
+        let request = EngineRequest {
+            request_id: 5,
+            task_id: 1,
+            area: Area::Finance,
+            priority: Priority::Normal,
+            eligible: vec![Candidate {
+                id: 3,
+                active_load: 0,
+                capacity: 1,
+            }],
+        };
+        sim.start(request.clone()).unwrap();
+        tokio::time::advance(Duration::from_millis(1_000)).await;
+        sim.start(request).unwrap();
+
+        let rows: i64 = store
+            .transaction(|tx| {
+                Ok(tx.query_row("SELECT COUNT(*) FROM sim_schedule", [], |r| r.get(0))?)
+            })
+            .unwrap();
+        assert_eq!(rows, 1);
+        assert_eq!(sim.timers.lock().unwrap().len(), 1);
+
+        tokio::time::advance(Duration::from_millis(60_000)).await;
+        for _ in 0..6 {
+            tokio::task::yield_now().await;
+        }
+        let first = incoming.try_recv().unwrap();
+        assert_eq!(first.request_id, 5);
+        assert_eq!(first.result, EngineResult::Match(3));
+        assert!(incoming.try_recv().is_err(), "a second report arrived");
     }
 }

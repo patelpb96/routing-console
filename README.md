@@ -78,6 +78,14 @@ transition writes its history event in the same transaction. There is no concurr
 reason about. Several tasks routing at once are just several timers delivering commands to the
 same queue.
 
+**A restart cannot lose a request.** A new request is committed first and handed to the engine
+after. If the process dies in between, the next start hands every still-pending request to the
+engine again; the engine ignores a request id it already holds, so nothing is scheduled twice.
+The resent request names the contributors eligible at the restart, not at the original submit;
+the app checks the engine's pick again when the answer arrives, so that is safe. With a real
+engine the request id would be sent as an idempotency key, so a resend could not be processed
+twice.
+
 **Each operator action carries the task version it saw.** A stale one is refused with the current
 state (two tabs, or an engine result landing first). Notes that only add information, such as a
 late result, do not change the version, so they cannot make the operator's next action stale.
@@ -178,18 +186,16 @@ corrections are in [docs/agent-ledger.md](docs/agent-ledger.md), one row per tas
 
 ## Known gaps
 
-- Four files are over the 400-line guide (`web/app.js` 447, `src/app.rs` 448,
+- Four files are over the 400-line guide (`web/app.js` 447, `src/app.rs` 482,
   `src/domain/rows.rs` 453, `tests/use_cases.rs` 427). Left as they are rather than split late.
 - Reset (simulation panel) is not atomic with seeding: a command sent in the instant between the
   wipe and the reseed could land on an empty board.
-- A crash between committing a new request and handing it to the engine leaves a request the
-  engine never heard of. To the operator it looks like any other request that has not answered,
-  which is the case the product is built for, but nothing resends it.
 - A value picked in the assign form is kept as a draft and can reappear in the reassign form
   after the task changes state.
-- If handing a new request to the engine fails after the command has committed, the reply is an
-  error although the task is already routing; the request then behaves like one that never
-  answers.
+- If handing a new request to the engine fails while the server keeps running, the reply is an
+  error although the command committed and the task is already routing. The request then looks
+  like one that never answers until the next start, which hands it over again (see "Important
+  decisions"). Nothing resends it sooner.
 - Redaction of the packed session copies covers key-shaped strings, email addresses and
   home-folder paths. The machine's user name can still appear in other forms (a dashed project
   folder name, a `DOMAIN

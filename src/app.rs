@@ -111,6 +111,11 @@ impl App {
         }
         let (reports, mut incoming) = mpsc::unbounded_channel();
         let sim = Arc::new(Simulator::new(store.clone(), clock.clone(), seed, reports)?);
+        // After the re-arm: hand over any request the engine may never have been told about.
+        // Writes nothing to the app's tables, so no version, state or event changes.
+        for request in store.transaction(|tx| pending_requests(tx))? {
+            sim.start(request)?;
+        }
         let app = Arc::new(App::assemble(store, clock, sim, boot));
         // Weak, so dropping the app drops the simulator's sender and ends this loop.
         let weak = Arc::downgrade(&app);
@@ -430,6 +435,19 @@ fn decide_and_apply(
             _ => None,
         })
         .unwrap_or_default();
+    Ok(Step::Applied(Some(engine_request(
+        conn, facts, request_id, excluded,
+    )?)))
+}
+
+/// What the engine is handed for one request: the task, and the contributors with its area
+/// that the request does not leave out, with their loads as they stand now.
+fn engine_request(
+    conn: &Connection,
+    facts: &TaskFacts,
+    request_id: i64,
+    excluded: &[i64],
+) -> Result<EngineRequest, AppError> {
     let eligible = read::eligible(conn, facts.task.area, excluded)?
         .into_iter()
         .map(|c| Candidate {
@@ -438,11 +456,27 @@ fn decide_and_apply(
             capacity: c.capacity,
         })
         .collect();
-    Ok(Step::Applied(Some(EngineRequest {
+    Ok(EngineRequest {
         request_id,
         task_id: facts.task.id,
         area: facts.task.area,
         priority: facts.task.priority,
         eligible,
-    })))
+    })
+}
+
+/// Every request still pending, rebuilt for the engine. A crash after a command commits its new
+/// request but before `finish` hands it over leaves a request the engine never heard of; on
+/// start each pending request is handed over again, and the engine ignores the ones it already
+/// holds. The eligible list (and its loads) is read as of this start, not as of the original
+/// submit: the original list was never stored, and loads only matter to the engine's pick,
+/// which the app checks again when the result arrives.
+fn pending_requests(conn: &Connection) -> Result<Vec<EngineRequest>, AppError> {
+    let mut out = Vec::new();
+    for facts in read::all_facts(conn)? {
+        if let Some(p) = &facts.pending {
+            out.push(engine_request(conn, &facts, p.id, &p.excluded)?);
+        }
+    }
+    Ok(out)
 }

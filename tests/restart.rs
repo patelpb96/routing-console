@@ -256,3 +256,80 @@ async fn a_blank_database_stays_blank_across_restarts() {
     assert_eq!(snap.contributors.len(), 8);
     assert_eq!(snap.boot.count, 3);
 }
+
+/// Rows `sim_schedule` holds for one request.
+fn schedule_rows(db: &TempDb, request_id: i64) -> i64 {
+    db.open()
+        .transaction(|tx| {
+            Ok(tx.query_row(
+                "SELECT COUNT(*) FROM sim_schedule WHERE request_id = ?1",
+                [request_id],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_the_engine_never_heard_of_is_handed_over_on_the_next_start() {
+    let db = TempDb::new("restart-unheard");
+    let clock = Clock::system();
+    let app = App::start_blank(db.open(), clock.clone()).unwrap();
+    let t = submitted(&app, "Unheard", "finance", "fast_match");
+    let request = t.pending_request.clone().unwrap().id;
+    assert_eq!(t.version, 2);
+    drop(app);
+    settle().await;
+    // The crash: the request row committed, the engine's own row never written.
+    db.open()
+        .transaction(|tx| {
+            Ok(tx.execute("DELETE FROM sim_schedule WHERE request_id = ?1", [request])?)
+        })
+        .unwrap();
+    assert_eq!(schedule_rows(&db, request), 0);
+
+    let app = App::start(db.open(), clock.clone()).unwrap();
+    let noted = app.task(t.id).unwrap();
+    assert_eq!((noted.state, noted.version), (TaskState::Routing, 2));
+    assert_eq!(schedule_rows(&db, request), 1);
+    advance_ms(6_000).await;
+    let done = app.task(t.id).unwrap();
+    assert_eq!((done.state, done.version), (TaskState::Offered, 3));
+    assert_eq!(count(&done, EventKind::EngineMatched), 1);
+    assert_eq!(
+        kinds(&done),
+        [
+            EventKind::TaskCreated,
+            EventKind::RoutingStarted,
+            EventKind::ServerRestarted,
+            EventKind::EngineMatched
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_the_engine_already_holds_is_not_scheduled_twice() {
+    let db = TempDb::new("restart-held");
+    let clock = Clock::system();
+    let app = App::start_blank(db.open(), clock.clone()).unwrap();
+    let t = submitted(&app, "Held", "finance", "fast_match");
+    let request = t.pending_request.clone().unwrap().id;
+
+    advance_ms(2_000).await;
+    let app = restart(app, &db, &clock).await;
+    advance_ms(2_000).await;
+    let app = restart(app, &db, &clock).await;
+    assert_eq!(schedule_rows(&db, request), 1);
+    // Due 6 s after the submit, as first planned, not 6 s after a restart.
+    advance_ms(2_000).await;
+    let done = app.task(t.id).unwrap();
+    assert_eq!((done.state, done.version), (TaskState::Offered, 3));
+    assert_eq!(done.events.last().unwrap().kind, EventKind::EngineMatched);
+    assert_eq!(done.events.last().unwrap().at_ms, t.events[1].at_ms + 6_000);
+    advance_ms(60_000).await;
+    let later = app.task(t.id).unwrap();
+    assert_eq!(later.version, 3);
+    assert_eq!(count(&later, EventKind::EngineMatched), 1);
+    assert_eq!(count(&later, EventKind::ServerRestarted), 2);
+    assert_eq!(schedule_rows(&db, request), 1);
+}
