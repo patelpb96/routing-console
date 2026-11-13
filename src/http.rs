@@ -22,6 +22,7 @@ use crate::error::AppError;
 
 const INDEX_HTML: &str = include_str!("../web/index.html");
 const APP_JS: &str = include_str!("../web/app.js");
+const SIM_JS: &str = include_str!("../web/sim.js");
 const STYLE_CSS: &str = include_str!("../web/style.css");
 
 type Shared = State<Arc<App>>;
@@ -32,6 +33,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route(
             "/app.js",
             get(|| page("text/javascript; charset=utf-8", APP_JS)),
+        )
+        .route(
+            "/sim.js",
+            get(|| page("text/javascript; charset=utf-8", SIM_JS)),
         )
         .route(
             "/style.css",
@@ -107,10 +112,21 @@ async fn scenario(
     Ok(Json(task).into_response())
 }
 
-async fn reset() -> Result<Response, AppError> {
-    Err(AppError::Refused(
-        "Simulation reset is not available in this build yet.".into(),
-    ))
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct ResetBody {
+    seed: Option<u64>,
+}
+
+/// The body is optional: no body, an empty body and `{}` all keep the stored seed.
+async fn reset(State(app): Shared, body: axum::body::Bytes) -> Result<Response, AppError> {
+    let body: ResetBody = if body.iter().all(u8::is_ascii_whitespace) {
+        ResetBody::default()
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|e| AppError::Refused(format!("Bad request body: {e}")))?
+    };
+    Ok(Json(app.reset(body.seed)?).into_response())
 }
 
 fn json_body<T>(body: Result<Json<T>, JsonRejection>) -> Result<T, AppError> {

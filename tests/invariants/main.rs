@@ -2,6 +2,12 @@
 //! random steps on the paused clock; after every step the nine invariants are checked by reading
 //! the tables directly, and the snapshot must agree with the tables.
 //!
+//! Each run starts from the seeded board (contract section 7), so declined, offered, assigned
+//! and no-match tasks are there from step one. Commands lean towards the ones the task's state
+//! allows and contributors towards the task's area, so the rarer rows (reassign, close,
+//! route again leaving out the decliners) are reached often; the rest stay random so refusals
+//! are exercised too. Reset is not part of these runs.
+//!
 //! `INVARIANT_SEEDS` and `INVARIANT_STEPS` raise the default 150 seeds of 80 steps.
 
 #[path = "../common/mod.rs"]
@@ -102,10 +108,40 @@ fn random_step(rng: &mut Rng, db: &Db, restarts: bool) -> Step {
                 1 => version + 1,
                 _ => version,
             };
-            let kind = rng.pick(OperatorKind::ALL).as_str().to_string();
+            let state = db.task(task).map_or("", |t| t.state.as_str());
+            let fitting: &[OperatorKind] = match state {
+                "unassigned" => &[OperatorKind::Submit],
+                "routing" => &[
+                    OperatorKind::RouteAgain,
+                    OperatorKind::CancelRouting,
+                    OperatorKind::Assign,
+                ],
+                "needs_attention" => &[
+                    OperatorKind::RouteAgain,
+                    OperatorKind::RouteAgain,
+                    OperatorKind::Assign,
+                    OperatorKind::Close,
+                ],
+                "offered" | "assigned" => &[OperatorKind::Assign],
+                _ => OperatorKind::ALL,
+            };
+            let kind = if rng.chance(70) {
+                rng.pick(fitting)
+            } else {
+                rng.pick(OperatorKind::ALL)
+            };
+            let kind = kind.as_str().to_string();
+            let area = db.task(task).map(|t| t.area.clone());
+            let in_area: Vec<i64> = db
+                .contributors
+                .iter()
+                .filter(|c| area.as_ref().is_some_and(|x| c.areas.contains(x)))
+                .map(|c| c.id)
+                .collect();
             let contributor_id = match rng.below(10) {
                 0 => None,
                 1 => Some(99),
+                2..7 if !in_area.is_empty() => Some(rng.pick(&in_area)),
                 _ => Some(db.contributors[rng.below(db.contributors.len() as u64) as usize].id),
             };
             let reason_code =
@@ -118,14 +154,27 @@ fn random_step(rng: &mut Rng, db: &Db, restarts: bool) -> Step {
                     contributor_id,
                     reason_code,
                     note: rng.chance(10).then(|| "random note".to_string()),
-                    exclude_previous: rng.chance(15),
+                    exclude_previous: rng.chance(if state == "needs_attention" { 60 } else { 15 }),
                 },
             }
         }
-        45..60 => Step::Reply {
-            assignment: (rng.below(db.assignments.len() as u64 + 2) + 1) as i64,
-            reply: rng.pick(&["accept", "accept", "decline", "fail"]),
-        },
+        45..60 => {
+            let offers: Vec<i64> = db
+                .assignments
+                .iter()
+                .filter(|a| a.status == "offered")
+                .map(|a| a.id)
+                .collect();
+            let assignment = if !offers.is_empty() && rng.chance(70) {
+                rng.pick(&offers)
+            } else {
+                (rng.below(db.assignments.len() as u64 + 2) + 1) as i64
+            };
+            Step::Reply {
+                assignment,
+                reply: rng.pick(&["accept", "accept", "decline", "fail"]),
+            }
+        }
         60..70 => Step::Scenario {
             task: task(rng),
             scenario: rng.pick(Scenario::ALL),
@@ -215,6 +264,17 @@ async fn run(seed: u64, steps: u64, seen: &mut BTreeMap<String, u64>) -> Result<
     }
     for e in &before.events {
         *seen.entry(e.kind.clone()).or_default() += 1;
+        let data: serde_json::Value = serde_json::from_str(&e.data).unwrap();
+        if data.get("withdrawn_assignment_id").is_some() {
+            *seen.entry("(reassigned)".into()).or_default() += 1;
+        }
+        if e.kind == "operator_rerouted"
+            && data["excluded"].as_array().is_some_and(|x| !x.is_empty())
+        {
+            *seen
+                .entry("(rerouted leaving someone out)".into())
+                .or_default() += 1;
+        }
     }
     drop(app);
     drop(store);
@@ -248,6 +308,11 @@ async fn random_command_runs_keep_every_invariant() {
         "operator_rerouted",
         "operator_cancelled_routing",
         "contributor_accepted",
+        "contributor_declined",
+        "offer_failed",
+        "task_closed",
+        "(reassigned)",
+        "(rerouted leaving someone out)",
     ] {
         assert!(
             seen.get(kind).copied().unwrap_or(0) > 0,

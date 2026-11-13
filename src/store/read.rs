@@ -114,11 +114,30 @@ fn complete_facts(conn: &Connection, task: Task) -> rusqlite::Result<TaskFacts> 
             },
         )
         .optional()?;
+    let turned_down = turned_down(conn, task.id)?;
     Ok(TaskFacts {
         task,
         pending,
         active,
+        turned_down,
     })
+}
+
+/// Contributors whose offer for this task ended `declined` or `failed`, oldest first, once each.
+fn turned_down(conn: &Connection, task_id: i64) -> rusqlite::Result<Vec<TurnedDown>> {
+    let mut stmt = conn.prepare(
+        "SELECT a.contributor_id, c.name FROM assignments a
+         JOIN contributors c ON c.id = a.contributor_id
+         WHERE a.task_id = ?1 AND a.status IN ('declined', 'failed')
+         GROUP BY a.contributor_id ORDER BY MIN(a.id)",
+    )?;
+    stmt.query_map([task_id], |r| {
+        Ok(TurnedDown {
+            contributor_id: r.get(0)?,
+            name: r.get(1)?,
+        })
+    })?
+    .collect()
 }
 
 const CONTRIBUTOR_QUERY: &str = "SELECT c.id, c.name, c.areas, c.capacity,

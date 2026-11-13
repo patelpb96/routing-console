@@ -154,14 +154,85 @@ pub fn decide(facts: &TaskFacts, cmd: &Command) -> Result<Decision, Refusal> {
             Ok(rows::server_restarted(task, pending(facts)?, *boot))
         }
         (
+            NeedsAttention,
+            Operator {
+                op:
+                    Op::RouteAgain {
+                        reason_code,
+                        exclude_previous,
+                    },
+                note,
+                ..
+            },
+        ) => {
+            let left_out: &[TurnedDown] = if *exclude_previous {
+                &facts.turned_down
+            } else {
+                &[]
+            };
+            Ok(rows::route_again_after_attention(
+                left_out,
+                *exclude_previous,
+                *reason_code,
+                note,
+            ))
+        }
+        (
+            NeedsAttention,
+            Operator {
+                op:
+                    Op::Assign {
+                        contributor,
+                        reason_code,
+                    },
+                note,
+                ..
+            },
+        ) => {
+            let code = required(*reason_code, OperatorKind::Assign)?;
+            assignable(facts, contributor)?;
+            Ok(rows::assign_by_hand(contributor, code, note))
+        }
+        (
+            Offered | Assigned,
+            Operator {
+                op:
+                    Op::Assign {
+                        contributor,
+                        reason_code,
+                    },
+                note,
+                ..
+            },
+        ) => {
+            let code = required(*reason_code, OperatorKind::Assign)?;
+            let Some(current) = &facts.active else {
+                return Err(refuse("The task is held but has no active assignment."));
+            };
+            assignable(facts, contributor)?;
+            Ok(rows::reassign(current, contributor, code, note))
+        }
+        (
+            NeedsAttention,
+            Operator {
+                op: Op::Close,
+                note,
+                ..
+            },
+        ) => Ok(rows::close(note)),
+        (
             Offered,
             Command::Reply {
                 assignment_id,
-                reply: Reply::Accept,
+                reply,
             },
         ) => match &facts.active {
             Some(a) if a.id == *assignment_id && a.status == AssignmentStatus::Offered => {
-                Ok(rows::accept(a))
+                Ok(match reply {
+                    Reply::Accept => rows::accept(a),
+                    Reply::Decline => rows::decline(a),
+                    Reply::Fail => rows::fail(a),
+                })
             }
             _ => Err(not_active_offer(*assignment_id)),
         },
@@ -180,7 +251,9 @@ pub fn allowed_commands(task: &Task) -> Vec<OperatorKind> {
     match task.state {
         TaskState::Unassigned => vec![Submit],
         TaskState::Routing => vec![RouteAgain, CancelRouting, Assign],
-        _ => Vec::new(),
+        TaskState::NeedsAttention => vec![RouteAgain, Assign, Close],
+        TaskState::Offered | TaskState::Assigned => vec![Assign],
+        TaskState::Closed => Vec::new(),
     }
 }
 

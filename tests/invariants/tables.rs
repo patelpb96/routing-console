@@ -20,6 +20,7 @@ pub struct RequestRow {
     pub result_kind: Option<String>,
     pub result_contributor_id: Option<i64>,
     pub returned_at_ms: Option<i64>,
+    pub excluded: Vec<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +29,8 @@ pub struct AssignmentRow {
     pub task_id: i64,
     pub contributor_id: i64,
     pub status: String,
+    pub request_id: Option<i64>,
+    pub ended_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,9 +91,11 @@ pub fn dump(store: &Store, now_ms: i64) -> Db {
                 ),
                 requests: rows(
                     c,
-                    "SELECT id, task_id, status, result_kind, result_contributor_id, returned_at_ms
+                    "SELECT id, task_id, status, result_kind, result_contributor_id, returned_at_ms,
+                         excluded
                      FROM routing_requests ORDER BY id",
                     |r| {
+                        let excluded: String = r.get(6)?;
                         Ok(RequestRow {
                             id: r.get(0)?,
                             task_id: r.get(1)?,
@@ -98,18 +103,22 @@ pub fn dump(store: &Store, now_ms: i64) -> Db {
                             result_kind: r.get(3)?,
                             result_contributor_id: r.get(4)?,
                             returned_at_ms: r.get(5)?,
+                            excluded: serde_json::from_str(&excluded).unwrap(),
                         })
                     },
                 ),
                 assignments: rows(
                     c,
-                    "SELECT id, task_id, contributor_id, status FROM assignments ORDER BY id",
+                    "SELECT id, task_id, contributor_id, status, request_id, ended_at_ms
+                     FROM assignments ORDER BY id",
                     |r| {
                         Ok(AssignmentRow {
                             id: r.get(0)?,
                             task_id: r.get(1)?,
                             contributor_id: r.get(2)?,
                             status: r.get(3)?,
+                            request_id: r.get(4)?,
+                            ended_at_ms: r.get(5)?,
                         })
                     },
                 ),

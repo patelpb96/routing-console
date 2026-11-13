@@ -31,6 +31,10 @@ pub struct EngineRequest {
 pub struct EngineReport {
     pub request_id: i64,
     pub result: EngineResult,
+    /// Which run of the engine's data sent it. A simulation reset starts a new run and request
+    /// ids start again from 1, so a report from an earlier run must not land on a new request
+    /// that happens to share its id.
+    pub epoch: u64,
 }
 
 /// Accepts a request now; reports on the channel it was built with later, or never.
@@ -40,8 +44,11 @@ pub struct EngineReport {
 /// recognises a repeat because the request row already holds a result.
 pub trait RoutingEngine: Send + Sync {
     fn start(&self, request: EngineRequest) -> Result<(), AppError>;
-    /// The app has committed (or deliberately refused) the report for this request.
-    fn acknowledge(&self, request_id: i64) -> Result<(), AppError>;
+    /// The app has committed (or deliberately refused) this report.
+    fn acknowledge(&self, report: &EngineReport) -> Result<(), AppError>;
+    /// False once the data the report was about has been wiped by a reset. Called by the app
+    /// inside the transaction that would apply the report, so a reset cannot slip in between.
+    fn is_current(&self, report: &EngineReport) -> bool;
 }
 
 vocab!(Scenario {

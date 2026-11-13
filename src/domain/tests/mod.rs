@@ -19,6 +19,7 @@ fn facts(state: TaskState) -> TaskFacts {
         task: task(state, 3),
         pending: None,
         active: None,
+        turned_down: vec![],
     }
 }
 
@@ -205,6 +206,7 @@ fn accept_of_an_assignment_that_is_not_the_active_offer_is_refused() {
     assert!(m.contains("99"), "{m}");
 }
 
+mod recovery;
 mod unresolved;
 
 #[test]
@@ -226,14 +228,18 @@ fn allowed_commands_follow_the_rows_written() {
             OperatorKind::Assign
         ]
     );
-    for s in [
-        TaskState::Offered,
-        TaskState::Assigned,
-        TaskState::NeedsAttention,
-        TaskState::Closed,
-    ] {
-        assert!(allowed_commands(&task(s, 1)).is_empty());
+    assert_eq!(
+        allowed_commands(&task(TaskState::NeedsAttention, 1)),
+        vec![
+            OperatorKind::RouteAgain,
+            OperatorKind::Assign,
+            OperatorKind::Close
+        ]
+    );
+    for s in [TaskState::Offered, TaskState::Assigned] {
+        assert_eq!(allowed_commands(&task(s, 1)), vec![OperatorKind::Assign]);
     }
+    assert!(allowed_commands(&task(TaskState::Closed, 1)).is_empty());
 }
 
 #[test]

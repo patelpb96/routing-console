@@ -107,6 +107,15 @@ pub fn apply(
                     [assignment_id],
                 )?;
             }
+            Change::EndAssignment {
+                assignment_id,
+                status,
+            } => {
+                conn.execute(
+                    "UPDATE assignments SET status = ?2, ended_at_ms = ?3 WHERE id = ?1",
+                    params![assignment_id, status.as_str(), now],
+                )?;
+            }
         }
     }
     if d.bump_version {

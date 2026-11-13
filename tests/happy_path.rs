@@ -67,7 +67,7 @@ const TASK_FIELDS: &[&str] = &[
 
 #[tokio::test(start_paused = true)]
 async fn one_task_goes_from_create_to_assigned() {
-    let app = App::start(Store::open_in_memory().unwrap(), Clock::system()).unwrap();
+    let app = App::start_blank(Store::open_in_memory().unwrap(), Clock::system()).unwrap();
 
     let task = app
         .create_task(CreateTask {

@@ -14,52 +14,8 @@ const HEALTHCARE: [i64; 3] = [2, 3, 7]; // Ben Okafor, Clara Voss, Grace Lin
 
 fn start() -> (std::sync::Arc<App>, Store) {
     let store = Store::open_in_memory().unwrap();
-    let app = App::start(store.clone(), Clock::system()).unwrap();
+    let app = App::start_blank(store.clone(), Clock::system()).unwrap();
     (app, store)
-}
-
-/// What the simulator decided for a request, read from its own table.
-fn engine_pick(store: &Store, request_id: i64) -> i64 {
-    store
-        .transaction(|tx| {
-            Ok(tx.query_row(
-                "SELECT contributor_id FROM sim_schedule WHERE request_id = ?1",
-                [request_id],
-                |r| r.get(0),
-            )?)
-        })
-        .unwrap()
-}
-
-/// (status, result_kind, result_contributor_id) of a request row.
-fn request_row(store: &Store, id: i64) -> (String, Option<String>, Option<i64>) {
-    store
-        .transaction(|tx| {
-            Ok(tx.query_row(
-                "SELECT status, result_kind, result_contributor_id FROM routing_requests
-                 WHERE id = ?1",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?)
-        })
-        .unwrap()
-}
-
-fn name(app: &App, id: i64) -> String {
-    let snap = app.snapshot().unwrap();
-    snap.contributors
-        .iter()
-        .find(|c| c.id == id)
-        .unwrap()
-        .name
-        .clone()
-}
-
-fn refused(r: Result<routing_console::snapshot::TaskView, AppError>) -> String {
-    match r {
-        Err(AppError::Refused(m)) => m,
-        other => panic!("expected a refusal, got {other:?}"),
-    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -129,12 +85,15 @@ async fn a_late_result_after_assign_by_hand_is_recorded_not_applied() {
     // Nothing comes again, and the version seen before the late result is still current.
     advance_ms(60_000).await;
     assert_eq!(app.task(t.id).unwrap().events.len(), after.events.len());
-    match app.command(t.id, assign(3, picked, Some("better_fit_known"))) {
-        Err(AppError::Refused(m)) => assert!(m.contains("offered"), "{m}"), // S3 adds this row
-        other => panic!("version 3 must not be stale: {other:?}"),
-    }
-    let done = app.reply(offer.id, "accept").unwrap();
-    assert_eq!((done.state, done.version), (TaskState::Assigned, 4));
+    // Reassigning (an S3 row) with that version is accepted, not stale.
+    let moved = app
+        .command(t.id, assign(3, picked, Some("better_fit_known")))
+        .unwrap();
+    assert_eq!((moved.state, moved.version), (TaskState::Offered, 4));
+    let new_offer = moved.active_assignment.clone().unwrap();
+    assert_eq!(new_offer.contributor_id, picked);
+    let done = app.reply(new_offer.id, "accept").unwrap();
+    assert_eq!((done.state, done.version), (TaskState::Assigned, 5));
 }
 
 #[tokio::test(start_paused = true)]
@@ -148,14 +107,15 @@ async fn route_again_ignores_the_old_result_and_applies_the_new_one() {
     let t = app
         .command(t.id, with_reason("route_again", 2, "engine_too_slow"))
         .unwrap();
-    assert_eq!((t.state, t.version), (TaskState::Routing, 2));
+    // The pending request changed, so the version went up (contract section 2).
+    assert_eq!((t.state, t.version), (TaskState::Routing, 3));
     let new = t.pending_request.clone().unwrap();
     assert_ne!(new.id, old);
     assert_eq!(new.elapsed_ms, 0);
 
     advance_ms(5_000).await; // 26 s: the old one answers
     let mid = app.task(t.id).unwrap();
-    assert_eq!((mid.state, mid.version), (TaskState::Routing, 2));
+    assert_eq!((mid.state, mid.version), (TaskState::Routing, 3));
     assert_eq!(count(&mid, EventKind::LateResultIgnored), 1);
     assert!(
         mid.events
@@ -168,7 +128,7 @@ async fn route_again_ignores_the_old_result_and_applies_the_new_one() {
 
     advance_ms(1_000).await; // 27 s: the new one answers
     let end = app.task(t.id).unwrap();
-    assert_eq!((end.state, end.version), (TaskState::Offered, 3));
+    assert_eq!((end.state, end.version), (TaskState::Offered, 4));
     assert_eq!(end.events.last().unwrap().kind, EventKind::EngineMatched);
     assert_eq!(end.events.last().unwrap().data["request_id"], new.id);
     assert_eq!(count(&end, EventKind::LateResultIgnored), 1);
@@ -220,7 +180,7 @@ async fn two_tasks_one_contributor_with_room_for_one() {
             Ok(())
         })
         .unwrap();
-    let app = App::start(store, Clock::system()).unwrap();
+    let app = App::start_blank(store, Clock::system()).unwrap();
     let a = submitted(&app, "First", "veterinary", "fast_match");
     let b = submitted(&app, "Second", "veterinary", "fast_match");
 
@@ -301,13 +261,14 @@ async fn assignable_ids_follow_the_assign_rule() {
         "no healthcare"
     );
 
-    // Offered: assign is not among its commands in this slice, so the list is empty.
+    // Offered: reassigning is allowed, so the list holds everyone with the area and room
+    // except the holder (Grace, who is also full).
     let offered = snap.tasks.iter().find(|v| v.id == filler.id).unwrap();
     assert!(
-        !offered
+        offered
             .allowed_commands
             .iter()
             .any(|k| k.as_str() == "assign")
     );
-    assert!(offered.assignable_contributor_ids.is_empty());
+    assert_eq!(offered.assignable_contributor_ids, vec![2, 3]);
 }

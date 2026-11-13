@@ -35,12 +35,21 @@ pub struct ActiveAssignment {
     pub reason_code: Option<ReasonCode>,
 }
 
+/// A contributor whose offer for this task ended `declined` or `failed`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TurnedDown {
+    pub contributor_id: i64,
+    pub name: String,
+}
+
 /// Everything `decide` may look at for one task.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskFacts {
     pub task: Task,
     pub pending: Option<PendingRequest>,
     pub active: Option<ActiveAssignment>,
+    /// Oldest first, each contributor once; what `exclude_previous` leaves out.
+    pub turned_down: Vec<TurnedDown>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -165,6 +174,11 @@ pub enum Change {
     },
     AcceptAssignment {
         assignment_id: i64,
+    },
+    /// The active assignment ends: `declined`, `failed` or `withdrawn`.
+    EndAssignment {
+        assignment_id: i64,
+        status: AssignmentStatus,
     },
 }
 

@@ -9,6 +9,7 @@ use std::time::Duration;
 use routing_console::app::{App, CommandInput, CreateTask};
 use routing_console::clock::Clock;
 use routing_console::domain::EventKind;
+use routing_console::error::AppError;
 use routing_console::snapshot::TaskView;
 use routing_console::store::Store;
 
@@ -117,4 +118,103 @@ pub async fn restart(app: Arc<App>, db: &TempDb, clock: &Clock) -> Arc<App> {
     drop(app);
     settle().await;
     App::start(db.open(), clock.clone()).unwrap()
+}
+
+/// What the simulator decided for a request, read from its own table.
+pub fn engine_pick(store: &Store, request_id: i64) -> i64 {
+    store
+        .transaction(|tx| {
+            Ok(tx.query_row(
+                "SELECT contributor_id FROM sim_schedule WHERE request_id = ?1",
+                [request_id],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap()
+}
+
+/// (status, result_kind, result_contributor_id) of a request row.
+pub fn request_row(store: &Store, id: i64) -> (String, Option<String>, Option<i64>) {
+    store
+        .transaction(|tx| {
+            Ok(tx.query_row(
+                "SELECT status, result_kind, result_contributor_id FROM routing_requests
+                 WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .unwrap()
+}
+
+/// (status, ended_at_ms is set) of an assignment row.
+pub fn assignment_row(store: &Store, id: i64) -> (String, bool) {
+    store
+        .transaction(|tx| {
+            Ok(tx.query_row(
+                "SELECT status, ended_at_ms IS NOT NULL FROM assignments WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?)
+        })
+        .unwrap()
+}
+
+/// Every contributor the task has ever been offered to, oldest first.
+pub fn offered_to(store: &Store, task_id: i64) -> Vec<i64> {
+    store
+        .transaction(|tx| {
+            let mut stmt = tx
+                .prepare("SELECT contributor_id FROM assignments WHERE task_id = ?1 ORDER BY id")?;
+            let ids = stmt
+                .query_map([task_id], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<i64>>>()?;
+            Ok(ids)
+        })
+        .unwrap()
+}
+
+pub fn name(app: &App, id: i64) -> String {
+    let snap = app.snapshot().unwrap();
+    snap.contributors
+        .iter()
+        .find(|c| c.id == id)
+        .unwrap()
+        .name
+        .clone()
+}
+
+pub fn load(app: &App, id: i64) -> i64 {
+    let snap = app.snapshot().unwrap();
+    snap.contributors
+        .iter()
+        .find(|c| c.id == id)
+        .unwrap()
+        .active_load
+}
+
+pub fn refused(r: Result<TaskView, AppError>) -> String {
+    match r {
+        Err(AppError::Refused(m)) => m,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+pub fn reply(app: &App, task: &TaskView, answer: &str) -> TaskView {
+    let offer = task.active_assignment.as_ref().expect("an active offer");
+    app.reply(offer.id, answer).unwrap()
+}
+
+pub fn exclude_previous(version: i64) -> CommandInput {
+    CommandInput {
+        exclude_previous: true,
+        ..command("route_again", version)
+    }
+}
+
+/// A store in memory with an app that has the contributors but none of the seeded tasks.
+pub fn blank() -> (Arc<App>, Store) {
+    let store = Store::open_in_memory().unwrap();
+    let app = App::start_blank(store.clone(), Clock::system()).unwrap();
+    (app, store)
 }

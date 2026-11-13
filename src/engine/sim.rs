@@ -4,10 +4,11 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use rusqlite::{OptionalExtension, params};
-use tokio::sync::mpsc::UnboundedSender;
+use rusqlite::{Connection, OptionalExtension, params};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::AbortHandle;
 
 use super::{EngineReport, EngineRequest, RoutingEngine, Scenario, plan};
@@ -34,7 +35,12 @@ CREATE TABLE IF NOT EXISTS sim_scenarios (
 pub struct Simulator {
     store: Store,
     clock: Clock,
-    seed: u64,
+    seed: AtomicU64,
+    /// Bumped by `wipe`; reports carry the value they were armed under.
+    epoch: AtomicU64,
+    /// False for the seeder's simulator: it writes the schedule but sets no timers, and the
+    /// seeder delivers what falls due as it moves its own clock.
+    armed: bool,
     reports: UnboundedSender<EngineReport>,
     timers: Mutex<Vec<AbortHandle>>,
 }
@@ -49,14 +55,61 @@ impl Simulator {
         seed: u64,
         reports: UnboundedSender<EngineReport>,
     ) -> Result<Self, AppError> {
-        let waiting = store.transaction(|tx| {
-            tx.execute_batch(SIM_SCHEMA)?;
+        let sim = Self::build(store, clock, seed, reports, true)?;
+        sim.rearm()?;
+        Ok(sim)
+    }
+
+    /// A simulator that plans and records like the real one but never sets a timer. The
+    /// seeder drives it with `due` on a clock it moves by hand.
+    pub fn unarmed(store: Store, clock: Clock, seed: u64) -> Result<Self, AppError> {
+        let (reports, _) = unbounded_channel();
+        Self::build(store, clock, seed, reports, false)
+    }
+
+    fn build(
+        store: Store,
+        clock: Clock,
+        seed: u64,
+        reports: UnboundedSender<EngineReport>,
+        armed: bool,
+    ) -> Result<Self, AppError> {
+        store.transaction(|tx| Ok(tx.execute_batch(SIM_SCHEMA)?))?;
+        Ok(Simulator {
+            store,
+            clock,
+            seed: AtomicU64::new(seed),
+            epoch: AtomicU64::new(0),
+            armed,
+            reports,
+            timers: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Arms a timer for every report not yet acknowledged.
+    pub fn rearm(&self) -> Result<(), AppError> {
+        for (report, due) in self.waiting(None)? {
+            self.arm(report, due);
+        }
+        Ok(())
+    }
+
+    /// Reports not yet acknowledged that fall due by `until_ms` (all of them for `None`),
+    /// earliest first.
+    pub fn due(&self, until_ms: i64) -> Result<Vec<(EngineReport, i64)>, AppError> {
+        self.waiting(Some(until_ms))
+    }
+
+    fn waiting(&self, until_ms: Option<i64>) -> Result<Vec<(EngineReport, i64)>, AppError> {
+        let epoch = self.epoch.load(Ordering::SeqCst);
+        self.store.transaction(|tx| {
             let mut stmt = tx.prepare(
                 "SELECT request_id, due_at_ms, outcome, contributor_id FROM sim_schedule
                  WHERE delivered = 0 AND due_at_ms IS NOT NULL
+                   AND (?1 IS NULL OR due_at_ms <= ?1)
                  ORDER BY due_at_ms, request_id",
             )?;
-            let rows = stmt.query_map([], |r| {
+            let rows = stmt.query_map([until_ms], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
                     r.get::<_, i64>(1)?,
@@ -76,25 +129,36 @@ impl Simulator {
                         )));
                     }
                 };
-                out.push((EngineReport { request_id, result }, due));
+                let report = EngineReport {
+                    request_id,
+                    result,
+                    epoch,
+                };
+                out.push((report, due));
             }
             Ok(out)
-        })?;
-        let sim = Simulator {
-            store,
-            clock,
-            seed,
-            reports,
-            timers: Mutex::new(Vec::new()),
-        };
-        for (report, due) in waiting {
-            sim.arm(report, due);
+        })
+    }
+
+    /// The simulation reset's part, run inside the reset's own transaction: every timer of
+    /// the old run is stopped and every report it already sent is made stale (the epoch
+    /// moves on, and the app checks it under the same lock), then the simulator's tables are
+    /// emptied.
+    pub fn wipe(&self, conn: &Connection, seed: Option<u64>) -> Result<(), AppError> {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+        let mut timers = self.timers.lock().unwrap_or_else(|p| p.into_inner());
+        for t in timers.drain(..) {
+            t.abort();
         }
-        Ok(sim)
+        conn.execute_batch("DELETE FROM sim_schedule; DELETE FROM sim_scenarios;")?;
+        if let Some(seed) = seed {
+            self.seed.store(seed, Ordering::SeqCst);
+        }
+        Ok(())
     }
 
     pub fn seed(&self) -> u64 {
-        self.seed
+        self.seed.load(Ordering::SeqCst)
     }
 
     pub fn set_scenario(&self, task_id: i64, scenario: Scenario) -> Result<(), AppError> {
@@ -142,6 +206,9 @@ impl Simulator {
 
     /// Sends `report` at `due_at_ms` on the app's clock, or at once when that has passed.
     fn arm(&self, report: EngineReport, due_at_ms: i64) {
+        if !self.armed {
+            return;
+        }
         let wait = (due_at_ms - self.clock.now_ms()).max(0) as u64;
         // The deadline is fixed here, not at the task's first poll, so a test that advances
         // the paused clock before the task runs still sees the timer fire on time.
@@ -172,7 +239,7 @@ impl Drop for Simulator {
 impl RoutingEngine for Simulator {
     fn start(&self, request: EngineRequest) -> Result<(), AppError> {
         let scenario = self.scenario(request.task_id)?;
-        let p = plan(self.seed, request.request_id, scenario, &request.eligible);
+        let p = plan(self.seed(), request.request_id, scenario, &request.eligible);
         let due = p.delay_ms.map(|d| self.clock.now_ms() + d as i64);
         let (outcome, contributor) = match (due, p.result) {
             (None, _) => ("never", None),
@@ -197,19 +264,28 @@ impl RoutingEngine for Simulator {
             let report = EngineReport {
                 request_id: request.request_id,
                 result: p.result,
+                epoch: self.epoch.load(Ordering::SeqCst),
             };
             self.arm(report, due);
         }
         Ok(())
     }
 
-    fn acknowledge(&self, request_id: i64) -> Result<(), AppError> {
+    fn acknowledge(&self, report: &EngineReport) -> Result<(), AppError> {
         self.store.transaction(|tx| {
-            tx.execute(
-                "UPDATE sim_schedule SET delivered = 1 WHERE request_id = ?1",
-                [request_id],
-            )?;
+            // Checked under the store lock, which a reset also holds while it wipes: a stale
+            // acknowledgement must not mark a new request with the same id as delivered.
+            if self.is_current(report) {
+                tx.execute(
+                    "UPDATE sim_schedule SET delivered = 1 WHERE request_id = ?1",
+                    [report.request_id],
+                )?;
+            }
             Ok(())
         })
+    }
+
+    fn is_current(&self, report: &EngineReport) -> bool {
+        report.epoch == self.epoch.load(Ordering::SeqCst)
     }
 }

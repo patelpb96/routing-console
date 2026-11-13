@@ -121,6 +121,7 @@ pub fn task_view(
         task,
         pending,
         active,
+        ..
     } = facts;
     let events = events(conn, task.id)?
         .into_iter()

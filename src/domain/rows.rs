@@ -55,18 +55,16 @@ pub fn submit(note: &Option<String>) -> Decision {
     )
 }
 
-/// Routing to routing: neither the state nor the active assignment changes, so by contract
-/// section 2 the version stays where it is.
+/// Routing to routing. The pending request changes, so by contract section 2 the version goes
+/// up: the elapsed clock another tab was judging has restarted.
 pub fn route_again(old: &PendingRequest, code: ReasonCode, note: &Option<String>) -> Decision {
-    Decision {
-        state: TaskState::Routing,
-        attention_reason: None,
-        bump_version: false,
-        changes: vec![
+    moves_to(
+        TaskState::Routing,
+        vec![
             Change::SupersedeRequest { request_id: old.id },
             Change::OpenRequest { excluded: vec![] },
         ],
-        events: vec![event(
+        event(
             EventKind::OperatorRerouted,
             Actor::Operator,
             format!(
@@ -75,8 +73,40 @@ pub fn route_again(old: &PendingRequest, code: ReasonCode, note: &Option<String>
             ),
             json!({"superseded_request_id": old.id, "reason_code": code, "excluded": [],
                    "note": note}),
-        )],
-    }
+        ),
+    )
+}
+
+/// Needs attention to routing. `left_out` is empty unless the operator asked to exclude the
+/// contributors who declined or failed earlier.
+pub fn route_again_after_attention(
+    left_out: &[TurnedDown],
+    exclude_previous: bool,
+    code: Option<ReasonCode>,
+    note: &Option<String>,
+) -> Decision {
+    let ids: Vec<i64> = left_out.iter().map(|t| t.contributor_id).collect();
+    let names: Vec<&str> = left_out.iter().map(|t| t.name.as_str()).collect();
+    let summary = match (exclude_previous, names.is_empty()) {
+        (true, false) => format!("Routed again, leaving out {}.", and_list(&names)),
+        (true, true) => {
+            "Routed again; nobody had declined or failed, so nobody is left out.".into()
+        }
+        (false, _) => "Routed again; everyone with the area is eligible.".into(),
+    };
+    moves_to(
+        TaskState::Routing,
+        vec![Change::OpenRequest {
+            excluded: ids.clone(),
+        }],
+        event(
+            EventKind::OperatorRerouted,
+            Actor::Operator,
+            summary,
+            json!({"exclude_previous": exclude_previous, "excluded": ids,
+                   "excluded_names": names, "reason_code": code, "note": note}),
+        ),
+    )
 }
 
 pub fn cancel_routing(old: &PendingRequest, code: ReasonCode, note: &Option<String>) -> Decision {
@@ -122,6 +152,80 @@ pub fn operator_assign(
             ),
             json!({"superseded_request_id": old.id, "contributor_id": c.id,
                    "contributor_name": c.name, "reason_code": code, "note": note}),
+        ),
+    )
+}
+
+/// Needs attention to offered: there is no pending request to set aside.
+pub fn assign_by_hand(c: &ContributorFacts, code: ReasonCode, note: &Option<String>) -> Decision {
+    moves_to(
+        TaskState::Offered,
+        vec![Change::OfferAssignment {
+            contributor_id: c.id,
+            source: Source::Operator,
+            reason_code: Some(code),
+            request_id: None,
+        }],
+        event(
+            EventKind::OperatorAssigned,
+            Actor::Operator,
+            format!("Assigned by hand to {} ({}).", c.name, why(code)),
+            json!({"contributor_id": c.id, "contributor_name": c.name, "reason_code": code,
+                   "note": note}),
+        ),
+    )
+}
+
+/// Offered or assigned to offered: the current assignment is withdrawn first, so the
+/// one-active-assignment index never sees two.
+pub fn reassign(
+    old: &ActiveAssignment,
+    c: &ContributorFacts,
+    code: ReasonCode,
+    note: &Option<String>,
+) -> Decision {
+    moves_to(
+        TaskState::Offered,
+        vec![
+            Change::EndAssignment {
+                assignment_id: old.id,
+                status: AssignmentStatus::Withdrawn,
+            },
+            Change::OfferAssignment {
+                contributor_id: c.id,
+                source: Source::Operator,
+                reason_code: Some(code),
+                request_id: None,
+            },
+        ],
+        event(
+            EventKind::OperatorAssigned,
+            Actor::Operator,
+            format!(
+                "Reassigned from {} to {} ({}).",
+                old.contributor_name,
+                c.name,
+                why(code)
+            ),
+            json!({"withdrawn_assignment_id": old.id,
+                   "previous_contributor_id": old.contributor_id,
+                   "previous_contributor_name": old.contributor_name,
+                   "previous_status": old.status,
+                   "contributor_id": c.id, "contributor_name": c.name,
+                   "reason_code": code, "note": note}),
+        ),
+    )
+}
+
+pub fn close(note: &Option<String>) -> Decision {
+    moves_to(
+        TaskState::Closed,
+        vec![],
+        event(
+            EventKind::TaskClosed,
+            Actor::Operator,
+            "Closed by the operator.".into(),
+            json!({"note": note}),
         ),
     )
 }
@@ -265,4 +369,61 @@ pub fn accept(a: &ActiveAssignment) -> Decision {
             json!({"assignment_id": a.id, "contributor_id": a.contributor_id}),
         ),
     )
+}
+
+const DECISION_NEEDED: &str =
+    "The task needs a decision: route again without them, assign by hand, or close.";
+
+pub fn decline(a: &ActiveAssignment) -> Decision {
+    needs_attention(
+        AttentionReason::Declined,
+        vec![Change::EndAssignment {
+            assignment_id: a.id,
+            status: AssignmentStatus::Declined,
+        }],
+        event(
+            EventKind::ContributorDeclined,
+            Actor::Contributor,
+            format!(
+                "{} declined the offer. {DECISION_NEEDED}",
+                a.contributor_name
+            ),
+            json!({"assignment_id": a.id, "contributor_id": a.contributor_id,
+                   "contributor_name": a.contributor_name}),
+        ),
+    )
+}
+
+pub fn fail(a: &ActiveAssignment) -> Decision {
+    needs_attention(
+        AttentionReason::OfferFailed,
+        vec![Change::EndAssignment {
+            assignment_id: a.id,
+            status: AssignmentStatus::Failed,
+        }],
+        event(
+            EventKind::OfferFailed,
+            Actor::System,
+            format!(
+                "The offer to {} could not be delivered. {DECISION_NEEDED}",
+                a.contributor_name
+            ),
+            json!({"assignment_id": a.id, "contributor_id": a.contributor_id,
+                   "contributor_name": a.contributor_name}),
+        ),
+    )
+}
+
+/// A reason code as it reads inside a sentence: "(better fit known)".
+fn why(code: ReasonCode) -> String {
+    code.label().to_lowercase()
+}
+
+/// "A", "A and B", "A, B and C".
+fn and_list(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }

@@ -54,11 +54,23 @@ pub struct App {
 }
 
 impl App {
-    /// Opens the app on a store: seeds an empty one, counts the boot, and starts consuming
-    /// engine reports. Must be called inside a tokio runtime.
+    /// Opens the app on a store: seeds an empty one (contributors and the six tasks of contract
+    /// section 7), counts the boot, and starts consuming engine reports. Must be called inside
+    /// a tokio runtime.
     pub fn start(store: Store, clock: Clock) -> Result<Arc<App>, AppError> {
+        Self::open(store, clock, true)
+    }
+
+    /// Like `start`, but an empty database gets the contributors only, never the six seeded
+    /// tasks, and is marked so a later `start` does not add them either. For tests that need
+    /// a board they control.
+    pub fn start_blank(store: Store, clock: Clock) -> Result<Arc<App>, AppError> {
+        Self::open(store, clock, false)
+    }
+
+    fn open(store: Store, clock: Clock, seed_tasks: bool) -> Result<Arc<App>, AppError> {
         let now = clock.now_ms();
-        let (seed, boot) = store.transaction(|tx| {
+        let (seed, boot, fresh) = store.transaction(|tx| {
             crate::seed::contributors_if_empty(tx)?;
             let seed = match meta_get(tx, "seed")? {
                 Some(s) => s.parse().map_err(|_| {
@@ -75,6 +87,8 @@ impl App {
                 + 1;
             meta_set(tx, "boot_count", &count.to_string())?;
             meta_set(tx, "boot_started_at_ms", &now.to_string())?;
+            let fresh = crate::seed::tasks_wanted(tx)?;
+            meta_set(tx, crate::seed::TASKS_SEEDED, "1")?;
             note_restart(tx, count, now)?;
             Ok((
                 seed,
@@ -82,30 +96,64 @@ impl App {
                     count,
                     started_at_ms: now,
                 },
+                fresh,
             ))
         })?;
+        if fresh && seed_tasks {
+            crate::seed::tasks(&store, now, seed)?;
+        }
         let (reports, mut incoming) = mpsc::unbounded_channel();
         let sim = Arc::new(Simulator::new(store.clone(), clock.clone(), seed, reports)?);
+        let app = Arc::new(App::assemble(store, clock, sim, boot));
+        // Weak, so dropping the app drops the simulator's sender and ends this loop.
+        let weak = Arc::downgrade(&app);
+        tokio::spawn(async move {
+            while let Some(report) = incoming.recv().await {
+                let Some(app) = weak.upgrade() else { break };
+                if let Err(e) = app.deliver(report) {
+                    eprintln!("engine result for request {}: {e}", report.request_id);
+                }
+            }
+        });
+        Ok(app)
+    }
+
+    /// An app without a report listener; `start` adds one, the seeder delivers by hand.
+    pub(crate) fn assemble(store: Store, clock: Clock, sim: Arc<Simulator>, boot: Boot) -> App {
         let (changed, _) = broadcast::channel(64);
-        let app = Arc::new(App {
+        App {
             store,
             clock,
             engine: sim.clone(),
             sim,
             changed,
             boot,
-        });
-        // Weak, so dropping the app drops the simulator's sender and ends this loop.
-        let weak = Arc::downgrade(&app);
-        tokio::spawn(async move {
-            while let Some(report) = incoming.recv().await {
-                let Some(app) = weak.upgrade() else { break };
-                if let Err(e) = app.apply_engine_result(report) {
-                    eprintln!("engine result for request {}: {e}", report.request_id);
-                }
+        }
+    }
+
+    /// `POST /api/sim/reset`: wipes every record (the simulator's tables included), stores
+    /// the new seed when one is given, and seeds the contributors and the six tasks again.
+    /// Timers of the old run are stopped, and any report one of them already sent is stale
+    /// (see `RoutingEngine::is_current`), so nothing of the old run lands on the new data.
+    pub fn reset(&self, seed: Option<u64>) -> Result<Snapshot, AppError> {
+        self.store.transaction(|tx| {
+            self.sim.wipe(tx, seed)?;
+            tx.execute_batch(
+                "DELETE FROM events; DELETE FROM assignments; DELETE FROM routing_requests;
+                 DELETE FROM tasks; DELETE FROM contributors;",
+            )?;
+            crate::seed::contributors_if_empty(tx)?;
+            if let Some(seed) = seed {
+                meta_set(tx, "seed", &seed.to_string())?;
             }
-        });
-        Ok(app)
+            meta_set(tx, crate::seed::TASKS_SEEDED, "1")?;
+            Ok(())
+        })?;
+        crate::seed::tasks(&self.store, self.clock.now_ms(), self.sim.seed())?;
+        // The seeder leaves nothing due, but a report it left waiting must still arrive.
+        self.sim.rearm()?;
+        self.notify();
+        self.snapshot()
     }
 
     /// Fires once after every committed change.
@@ -201,19 +249,37 @@ impl App {
 
     /// Applies one engine report and acknowledges it, so the engine stops re-sending it. A
     /// refused report (a repeat after a restart, say) is acknowledged too: sending it again
-    /// would be refused again. Only an internal error leaves it for the next start.
+    /// would be refused again. Only an internal error leaves it for the next start. A report
+    /// from before a reset is dropped unread and unacknowledged, as `NotFound`.
     pub fn apply_engine_result(&self, report: EngineReport) -> Result<TaskView, AppError> {
         let outcome = self.engine_result(report);
         match &outcome {
-            Err(AppError::Internal(_)) => {}
-            _ => self.engine.acknowledge(report.request_id)?,
+            Err(AppError::Internal(_)) | Ok(None) => {}
+            _ => self.engine.acknowledge(&report)?,
         }
-        outcome
+        outcome?.ok_or_else(|| {
+            AppError::NotFound(format!(
+                "Report for request {} belongs to data wiped by a reset.",
+                report.request_id
+            ))
+        })
     }
 
-    fn engine_result(&self, report: EngineReport) -> Result<TaskView, AppError> {
+    /// The report listener's entry point.
+    fn deliver(&self, report: EngineReport) -> Result<(), AppError> {
+        match self.apply_engine_result(report) {
+            Ok(_) | Err(AppError::NotFound(_)) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn engine_result(&self, report: EngineReport) -> Result<Option<TaskView>, AppError> {
         let now = self.clock.now_ms();
-        let (task_id, step) = self.store.transaction(|tx| {
+        let applied = self.store.transaction(|tx| {
+            // Under the store lock, which a reset holds while it wipes.
+            if !self.engine.is_current(&report) {
+                return Ok(None);
+            }
             let (task_id, request) = read::request(tx, report.request_id)?.ok_or_else(|| {
                 AppError::Internal(format!("unknown request {}", report.request_id))
             })?;
@@ -227,9 +293,12 @@ impl App {
                 result: report.result,
                 contributor,
             };
-            Ok((task_id, decide_and_apply(tx, &facts, &cmd, now)?))
+            Ok(Some((task_id, decide_and_apply(tx, &facts, &cmd, now)?)))
         })?;
-        self.finish(task_id, step)
+        match applied {
+            None => Ok(None),
+            Some((task_id, step)) => self.finish(task_id, step).map(Some),
+        }
     }
 
     pub fn set_scenario(&self, task_id: i64, scenario: &str) -> Result<TaskView, AppError> {

@@ -87,15 +87,21 @@ pub fn check(before: &Db, after: &Db) -> Result<(), String> {
             ));
         }
         let holder = |db: &Db| db.active(b.id).first().map(|x| (x.id, x.status.clone()));
-        let changed = a.state != b.state || holder(before) != holder(after);
+        let pending = |db: &Db| db.pending(b.id).first().map(|r| r.id);
+        let changed = a.state != b.state
+            || holder(before) != holder(after)
+            || pending(before) != pending(after);
         if changed != (a.version != b.version) {
             return Err(format!(
-                "6: task {} {} -> {} (holder {:?} -> {:?}) but version {} -> {}",
+                "6: task {} {} -> {} (holder {:?} -> {:?}, pending {:?} -> {:?}) but version \
+                 {} -> {}",
                 b.id,
                 b.state,
                 a.state,
                 holder(before),
                 holder(after),
+                pending(before),
+                pending(after),
                 b.version,
                 a.version
             ));
@@ -153,6 +159,27 @@ pub fn check(before: &Db, after: &Db) -> Result<(), String> {
             if !same {
                 return Err(format!("7: task {} changed by a note-only step", b.id));
             }
+        }
+    }
+    // The engine is never handed, and so never offers, a contributor its request left out;
+    // and an ended assignment has an end time.
+    for a in &after.assignments {
+        if let Some(r) = a
+            .request_id
+            .and_then(|id| after.requests.iter().find(|r| r.id == id))
+            && r.excluded.contains(&a.contributor_id)
+        {
+            return Err(format!(
+                "exclude: assignment {} went to {}, left out of request {}",
+                a.id, a.contributor_id, r.id
+            ));
+        }
+        let ended = !matches!(a.status.as_str(), "offered" | "accepted");
+        if ended != a.ended_at_ms.is_some() {
+            return Err(format!(
+                "assignment {} is {} with end {:?}",
+                a.id, a.status, a.ended_at_ms
+            ));
         }
     }
     // 8

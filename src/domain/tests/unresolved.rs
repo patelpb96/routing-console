@@ -54,10 +54,11 @@ fn a_match_naming_an_unknown_contributor_is_refused() {
 }
 
 #[test]
-fn route_again_supersedes_and_opens_without_a_version_change() {
+fn route_again_supersedes_opens_and_bumps_the_version() {
+    // Contract section 2: the pending request changed, so the version goes up.
     let d = decide(&routing_facts(), &route_again(SLOW, false, 3)).unwrap();
     assert_eq!(d.state, TaskState::Routing);
-    assert!(!d.bump_version);
+    assert!(d.bump_version);
     assert_eq!(
         d.changes,
         vec![
@@ -207,19 +208,7 @@ fn server_restarted_is_a_system_note_without_a_version_change() {
 }
 
 #[test]
-fn rows_left_for_the_next_slice_are_still_refused() {
-    let reply = |r| Command::Reply {
-        assignment_id: 4,
-        reply: r,
-    };
-    refused(decide(&offered_facts(), &reply(Reply::Decline)));
-    refused(decide(&offered_facts(), &reply(Reply::Fail)));
-    refused(decide(&offered_facts(), &assign(grace(), SLOW)));
-    let mut attention = facts(TaskState::NeedsAttention);
-    attention.task.attention_reason = Some(AttentionReason::NoMatch);
-    refused(decide(&attention, &route_again(SLOW, false, 3)));
-    refused(decide(&attention, &route_again(SLOW, true, 3)));
-    refused(decide(&attention, &assign(grace(), SLOW)));
+fn close_from_routing_is_still_refused() {
     refused(decide(&routing_facts(), &op(OperatorOp::Close, 3)));
 }
 
@@ -237,6 +226,8 @@ fn assignable_contributors_uses_the_assign_check_and_only_where_assign_is_allowe
     };
     let all = [contributor(0, 2), grace(), vet, full];
     assert_eq!(assignable_contributors(&routing_facts(), &all), vec![2, 7]);
-    assert!(assignable_contributors(&offered_facts(), &all).is_empty());
+    // Reassigning from offered is a row now; the holder (2) is left out.
+    assert_eq!(assignable_contributors(&offered_facts(), &all), vec![7]);
+    assert!(assignable_contributors(&facts(TaskState::Closed), &all).is_empty());
     assert!(assignable_contributors(&facts(TaskState::Unassigned), &all).is_empty());
 }
