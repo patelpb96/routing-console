@@ -119,6 +119,7 @@ On start-up the app writes one `server_restarted` event on every task that has a
 | `POST /api/sim/assignments/{id}/reply` | `{reply}` where reply is `accept`, `decline` or `fail` | 200, or 422 when the assignment is not the active offer. |
 | `POST /api/sim/tasks/{id}/scenario` | `{scenario}` | 200. Applies to requests started afterwards. |
 | `POST /api/sim/reset` | `{seed?}` | 200. Wipes the data and seeds again. |
+| `GET /api/overrides.jsonl` | | Stretch item. One JSON object per line for every operator command that carried a reason code, joined to what the engine later said for the request it set aside (`engine_result`: `none_yet`, `match`, `no_match`; `agreed` for hand assignments). Read only. |
 
 Snapshot:
 

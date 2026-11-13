@@ -94,6 +94,12 @@ request id, not from the order things happen in. Per-task scenarios (auto, fast 
 no match, never returns) make every path repeatable. The simulator keeps its own schedule table
 and reloads it on start, the way an outside service would have kept running.
 
+**Overrides can be exported with the engine's eventual answer.** "Download overrides (JSON
+lines)" gives one line per operator command that carried a reason code, joined to what the engine
+later said for the request it set aside: `match`, `no_match` or `none_yet`, and for hand
+assignments whether the two agreed. Stepping in on a silent request is not counted as a
+disagreement; it is recorded as no answer yet. This was the plan's stretch item.
+
 **The browser holds no state.** One render function draws everything from one server snapshot;
 server-sent events tell the page to fetch it again. A refresh changes nothing.
 
@@ -118,6 +124,7 @@ src/store/      SQLite: schema, reads, writes; one transaction per command
 src/engine.rs   RoutingEngine trait and the seeded simulator with its own schedule table
 src/app.rs      load, decide, persist, notify
 src/snapshot.rs the one JSON document the page draws from
+src/overrides.rs the override export, one JSON object per line
 src/http.rs     JSON routes, server-sent events, embedded static files
 web/            index.html, app.js, style.css (plain JavaScript, no build step)
 tests/          use cases on tokio's paused clock, restart, random command runs
@@ -125,3 +132,77 @@ tools/check/    submission checker for the brief's file rules (standard library 
 tools/check-all the one gate command
 docs/           brief, plan, contract, agent ledger, test-case log
 ```
+
+## How it is checked
+
+`cargo check-all` is the one gate. It applies formatting, runs clippy (warnings only), runs every
+test (blocking), and runs three repository rules (warnings only: allowed file types, no file over
+1 MB, no source file over 400 lines).
+
+| Tests | What they prove |
+|---|---|
+| `src/domain/tests/` | Every row of the transition table and its refusals, with no database. |
+| `tests/happy_path.rs`, `tests/unresolved.rs`, `tests/recovery.rs` | Each scenario on tokio's paused clock: 26 seconds of waiting runs in milliseconds and gives the same answer every time. |
+| `tests/use_cases.rs` | The brief's four use cases as four named tests, plus the seed states and reset. |
+| `tests/overrides.rs` | The override export: the late-return story before and after the engine answers, and every command that does or does not produce a line. |
+| `tests/restart.rs` | A real database file, the app stopped and started again: pending requests survive, overdue results are delivered, a late result after a restart is still not applied. |
+| `tests/invariants/` | Random command runs. A seeded generator fires operator commands (right and stale versions), contributor replies, scenario changes, clock jumps and restarts; after every step nine invariants from `docs/contract.md` are checked against the tables with SQL, and the snapshot is compared with the tables. Default 150 seeds of 80 steps; `INVARIANT_SEEDS` and `INVARIANT_STEPS` raise it. |
+| `tools/check/cases/` | 55 data-file cases for the submission checker, five per file rule. |
+
+The submission checker is separate from the product: `cargo run -p check -- submission/` prints
+one line per rule taken from the brief (file count, file size, build output, secrets, session
+exports, answer template, session map, company name, personal information, time budget, video
+length) and says what it could not check. Its contract is `tools/check/RULES.md`.
+
+## How it was built
+
+With coding agents, directed and checked by an orchestrating session; the human decisions and
+corrections are in [docs/agent-ledger.md](docs/agent-ledger.md), one row per task card.
+
+- The plan ([docs/plan.html](docs/plan.html)) was written, corrected and approved before any code.
+- One task card per slice: scope, files the coder may touch, the contract, acceptance checks,
+  what is out of scope. One coding agent writes at a time (two only when their folders do not
+  overlap). Coders have no web access; small agents fetch pages and write test cases as data.
+- A coder's "all green" is not accepted as given. The orchestrator reruns the gate in a plain
+  shell, reads the diff against the card, and drives a real browser. Twice that found something
+  the report had not: a pass that depended on a private helper script, and the word "null" on the
+  page.
+- A failed gate is sorted before anything is fixed: it blocks only if the build, a test, an
+  invariant, a use case or one of the brief's file rules fails. Everything else is logged as
+  deferred and listed below.
+- Pass or fail questions a script can answer are answered by a script.
+
+## Known gaps
+
+- Four files are over the 400-line guide (`web/app.js` 447, `src/app.rs` 436,
+  `src/domain/rows.rs` 429, `tests/use_cases.rs` 427). Left as they are rather than split late.
+- Reset (simulation panel) is not atomic with seeding: a command sent in the instant between the
+  wipe and the reseed could land on an empty board.
+- A crash between committing a new request and handing it to the engine leaves a request the
+  engine never heard of. To the operator it looks like any other request that has not answered,
+  which is the case the product is built for, but nothing resends it.
+- A value picked in the assign form is kept as a draft and can reappear in the reassign form
+  after the task changes state.
+- The page was verified in one browser engine (Chromium), in light and dark and at 360 px width.
+  No screen-reader pass.
+- The submission checker knows four build-folder names (`node_modules`, `target`, `dist`,
+  `build`), scans for secrets by pattern, and can only look for the company's name when it is
+  given on the command line. It is a safety net, not a guarantee.
+- Development machine only: one Visual Studio Build Tools install there is incomplete, so
+  `.cargo/config.toml` links the C runtime statically and builds SQLite without compiler
+  intrinsics. Both settings are harmless on a complete toolchain. On that machine the first build
+  after `cargo clean` must be `cargo check-all`.
+
+## Left out on purpose
+
+- **Work after acceptance.** The brief says routing is complete once a contributor accepts, so
+  there is no in-progress or done tracking.
+- **Automatic retries and timeouts.** A pending request is unknown, and the app does not turn
+  unknown into failed. A bounded, opt-in retry policy that supersedes the old request in the same
+  transaction is the first thing I would add next.
+- **Contributor screens and sign-in.** Contributor replies come from the simulation panel. There
+  is one operator and no accounts.
+- **A real matching algorithm.** The simulator picks the least loaded eligible contributor. The
+  brief says matching quality is not the point.
+- **Deployment, several servers, an external queue.** One process and one SQLite file.
+- **Editing contributors or their expertise.** The panel is seed data.
