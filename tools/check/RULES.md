@@ -11,6 +11,7 @@ cargo run -p check -- <submission-dir> [--answer <file>] [--repo <dir>] [--ledge
                       [--company-name <text>] [--public] [--max-bytes <n>]
 cargo run -p check -- --run-cases <cases-dir> [--rule <rule-id>] [--batch <n>] [--markdown]
 cargo run -p check -- --repo-rules <repo-dir>
+cargo run -p check -- --redact <dir>
 ```
 
 Defaults: `--answer SUBMISSION.md`, `--repo .`, `--ledger docs/agent-ledger.md`,
@@ -27,6 +28,25 @@ Exit code: 1 if any rule is `FAIL`, 2 on a usage error (including a submission d
 not exist), otherwise 0. `WARN` and `MANUAL` never change the exit code.
 
 A secret that is found is never printed. Report the file, the line number and the pattern name.
+
+## Redaction (added in slice S5)
+
+```
+cargo run -p check -- --redact <dir>
+```
+
+The first real run of the checker on copies of the session exports failed rule 4 with 48 hits.
+Every one was this file's own pattern table, or the checker's source, quoted inside a transcript.
+The rule cannot tell a quoted pattern from a leaked key, and it should not try. So the packed
+copies are redacted instead: `--redact` rewrites the text files under `<dir>` so that rules 4 and
+9 find nothing and rule 5 still passes. It shares its patterns with the rules, replaces only the
+matched part (`[REDACTED]`, `[email]`, `[user]`), writes a file only after the result has been
+scanned again and every JSON line still parses, and refuses any folder outside this workspace,
+the workspace root itself, or anything under `.git`. The raw exports are kept elsewhere and are
+never touched. It does not look for the company's name: rule 8 stays a decision for a person.
+
+Packing order: copy the exports into `submission/`, run `--redact submission/`, then run the
+checker on `submission/`.
 
 ## Definitions
 

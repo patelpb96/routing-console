@@ -16,7 +16,7 @@ fn name_char(b: u8) -> bool {
 }
 
 /// `local@domain.tld` spans in a line (byte ranges), excluding noreply / no-reply.
-fn emails(line: &str) -> Vec<(usize, usize)> {
+pub fn emails(line: &str) -> Vec<(usize, usize)> {
     let b = line.as_bytes();
     let mut out = Vec::new();
     for (at, _) in line.match_indices('@') {
@@ -82,6 +82,15 @@ fn name_end(b: &[u8], from: usize) -> Option<usize> {
 
 /// Home-folder path spans: `X:\Users\name` (any separator), `/Users/name`, `/home/name`.
 fn home_paths(line: &str) -> Vec<(usize, usize)> {
+    home_path_names(line)
+        .into_iter()
+        .map(|(s, _, e)| (s, e))
+        .collect()
+}
+
+/// Home-folder paths as (start of the path, start of the name, end): `--redact` replaces only
+/// the name, so the drive, the `Users` / `home` part and the separators stay as they were.
+pub fn home_path_names(line: &str) -> Vec<(usize, usize, usize)> {
     let lower = line.to_ascii_lowercase();
     let b = lower.as_bytes();
     let mut out = Vec::new();
@@ -93,14 +102,14 @@ fn home_paths(line: &str) -> Vec<(usize, usize)> {
         };
         let sb = sep_before(b, i);
         if sb > 0 && i >= sb + 2 && b[i - sb - 1] == b':' && b[i - sb - 2].is_ascii_alphabetic() {
-            out.push((i - sb - 2, end));
+            out.push((i - sb - 2, after + s, end));
         } else if i >= 1 && b[i - 1] == b'/' && b[after] == b'/' {
-            out.push((i - 1, end));
+            out.push((i - 1, after + s, end));
         }
     }
     for (i, _) in lower.match_indices("/home/") {
         if let Some(end) = name_end(b, i + 6) {
-            out.push((i, end));
+            out.push((i, i + 6, end));
         }
     }
     out

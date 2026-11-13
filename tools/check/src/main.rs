@@ -7,6 +7,7 @@ mod json;
 mod ledger;
 mod model;
 mod personal;
+mod redact;
 mod repo;
 mod repo_rules;
 mod rules_files;
@@ -23,7 +24,8 @@ const USAGE: &str = "usage:
   check <submission-dir> [--answer <file>] [--repo <dir>] [--ledger <file>]
         [--company-name <text>] [--public] [--max-bytes <n>]
   check --run-cases <cases-dir> [--rule <rule-id>] [--batch <n>] [--markdown]
-  check --repo-rules <repo-dir>";
+  check --repo-rules <repo-dir>
+  check --redact <dir>";
 
 fn usage_error(msg: &str) -> ExitCode {
     eprintln!("check: {msg}\n{USAGE}");
@@ -40,6 +42,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("--run-cases") => run_cases(args.into_iter().skip(1)),
         Some("--repo-rules") => repo_rules_mode(&args[1..]),
+        Some("--redact") => redact_mode(&args[1..]),
         Some("-h" | "--help") => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
@@ -61,6 +64,19 @@ fn repo_rules_mode(rest: &[String]) -> Result<i32, String> {
         return Err(format!("{} is not a directory", dir.display()));
     }
     Ok(repo_rules::run(dir))
+}
+
+fn redact_mode(rest: &[String]) -> Result<i32, String> {
+    let [dir] = rest else {
+        return Err("--redact takes exactly one directory".into());
+    };
+    match redact::guard(Path::new(dir), &redact::workspace_root()) {
+        Ok(real) => Ok(redact::run(&real, dir)),
+        Err(msg) => {
+            eprintln!("check: {msg}");
+            Ok(2)
+        }
+    }
 }
 
 fn run_cases(mut args: impl Iterator<Item = String>) -> Result<i32, String> {

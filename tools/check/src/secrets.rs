@@ -58,35 +58,70 @@ fn left_ok(line: &str, i: usize) -> bool {
     }
 }
 
-/// Names of every pattern that matches in one line (each name at most once).
-pub fn scan_line(line: &str) -> Vec<&'static str> {
-    let mut found: Vec<&'static str> = Vec::new();
-    let mut add = |n: &'static str| {
-        if !found.contains(&n) {
-            found.push(n);
-        }
-    };
+/// One match: the pattern name and the byte range of the part `--redact` replaces (the run after
+/// a prefix, the bearer token, the password value, or the word `BEGIN` of a key header).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hit {
+    pub name: &'static str,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Every match in one line, grouped by pattern in the order the rule reports them. This is the
+/// one definition of each pattern: the rule and the redactor both read it.
+pub fn hits(line: &str) -> Vec<Hit> {
+    let mut out = Vec::new();
     let bytes = line.as_bytes();
     for (name, prefix, set, min) in PREFIXES {
         for (i, _) in line.match_indices(prefix) {
-            if left_ok(line, i) && run_len(bytes, i + prefix.len(), *set) >= *min {
-                add(name);
+            let from = i + prefix.len();
+            let n = run_len(bytes, from, *set);
+            if left_ok(line, i) && n >= *min {
+                out.push(Hit {
+                    name,
+                    start: from,
+                    end: from + n,
+                });
             }
         }
     }
     let lower = line.to_ascii_lowercase();
     for (i, _) in lower.match_indices("bearer ") {
-        if left_ok(line, i) && run_len(bytes, i + 7, bearer_chars) >= 20 {
-            add("bearer");
+        let n = run_len(bytes, i + 7, bearer_chars);
+        if left_ok(line, i) && n >= 20 {
+            out.push(Hit {
+                name: "bearer",
+                start: i + 7,
+                end: i + 7 + n,
+            });
         }
     }
     if let Some(b) = line.find("-----BEGIN ")
         && line[b..].contains("PRIVATE KEY-----")
     {
-        add("private-key");
+        out.push(Hit {
+            name: "private-key",
+            start: b + 5,
+            end: b + 10,
+        });
     }
-    if password_match(&lower) {
-        add("password");
+    for (start, end) in password_values(&lower) {
+        out.push(Hit {
+            name: "password",
+            start,
+            end,
+        });
+    }
+    out
+}
+
+/// Names of every pattern that matches in one line (each name at most once).
+pub fn scan_line(line: &str) -> Vec<&'static str> {
+    let mut found: Vec<&'static str> = Vec::new();
+    for h in hits(line) {
+        if !found.contains(&h.name) {
+            found.push(h.name);
+        }
     }
     found
 }
@@ -120,12 +155,18 @@ fn required_dquote(b: &[u8], i: usize) -> Option<usize> {
     None
 }
 
+/// The value at the start of `s`: chars up to whitespace, a quote or a backslash.
+fn value_run(s: &str) -> &str {
+    let n = s
+        .char_indices()
+        .find(|(_, c)| c.is_whitespace() || *c == '"' || *c == '\'' || *c == '\\')
+        .map_or(s.len(), |(i, _)| i);
+    &s[..n]
+}
+
 /// A value: 4+ chars that are not whitespace, quote or backslash, not a placeholder or mask.
 pub fn is_value(s: &str) -> bool {
-    let v: String = s
-        .chars()
-        .take_while(|c| !(c.is_whitespace() || *c == '"' || *c == '\'' || *c == '\\'))
-        .collect();
+    let v = value_run(s);
     if v.chars().count() < 4 {
         return false;
     }
@@ -138,7 +179,20 @@ pub fn is_value(s: &str) -> bool {
 }
 
 /// The two `password` shapes. `lower` is the line in ASCII lower case. No left boundary.
+#[cfg(test)]
 fn password_match(lower: &str) -> bool {
+    !password_values(lower).is_empty()
+}
+
+/// Byte ranges of the values in every `password` match (ASCII lower-casing keeps offsets).
+fn password_values(lower: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut push = |k: usize| {
+        let range = (k, k + value_run(&lower[k..]).len());
+        if !out.contains(&range) {
+            out.push(range);
+        }
+    };
     let b = lower.as_bytes();
     for (i, _) in lower.match_indices("password") {
         let after = i + "password".len();
@@ -147,7 +201,7 @@ fn password_match(lower: &str) -> bool {
         if j < b.len() && b[j] == b'=' {
             let k = optional_quote(b, skip_spaces(b, j + 1));
             if is_value(&lower[k..]) {
-                return true;
+                push(k);
             }
         }
         // Shape 2: "password" : "value" (quotes optionally backslash-escaped)
@@ -161,12 +215,12 @@ fn password_match(lower: &str) -> bool {
                 if let Some(k) = required_dquote(b, k)
                     && is_value(&lower[k..])
                 {
-                    return true;
+                    push(k);
                 }
             }
         }
     }
-    false
+    out
 }
 
 /// Rule 4 over every text file under the submission directory.

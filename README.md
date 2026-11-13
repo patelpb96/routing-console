@@ -59,8 +59,9 @@ due while the app was down.
 
 **Unknown stays unknown.** A pending request has no timeout and never becomes "failed" on its
 own. "Past the normal window" is worked out from the clock each time the page is drawn and is
-never stored, so it needs no timer and is still right after a restart. A bounded retry policy is
-the first thing I would add next; it is left out so the operator's judgment stays visible.
+never stored, so it needs no timer and is still right after a restart. A bounded, opt-in retry
+policy is what I would add next (see "What would come next"); it is left out so the operator's
+judgment stays visible.
 
 **A late answer is recorded, not applied.** When the operator steps in, the outstanding request is
 marked superseded and stays on record. If it returns later, the result is written to that request
@@ -152,7 +153,9 @@ test (blocking), and runs three repository rules (warnings only: allowed file ty
 The submission checker is separate from the product: `cargo run -p check -- submission/` prints
 one line per rule taken from the brief (file count, file size, build output, secrets, session
 exports, answer template, session map, company name, personal information, time budget, video
-length) and says what it could not check. Its contract is `tools/check/RULES.md`.
+length) and says what it could not check. `cargo run -p check -- --redact submission/` first
+rewrites the packed copies of the session exports (never the originals) so that no key-shaped
+string, email address or home-folder name is left in them. Its contract is `tools/check/RULES.md`.
 
 ## How it was built
 
@@ -193,13 +196,41 @@ corrections are in [docs/agent-ledger.md](docs/agent-ledger.md), one row per tas
   intrinsics. Both settings are harmless on a complete toolchain. On that machine the first build
   after `cargo clean` must be `cargo check-all`.
 
+## What would come next: bounded automatic retry
+
+Written down as a plan, not built. Today nothing happens to a silent request until the operator
+acts. The next step is to let the app route again by itself, within limits.
+
+- **A timeout is a trigger, not a verdict.** The app would still never call a pending request
+  failed. What makes acting on a timeout safe already exists: routing again supersedes the old
+  request, and a result that arrives late is recorded and never applied.
+- **Policy.** Route again automatically at about 30 seconds, at most three attempts in all, then
+  hand the task to the operator as needs attention. Opt-in and off by default, so the
+  operator-driven behaviour the brief describes stays the default.
+- **Why about 30 seconds and not a minute.** The engine's stated window is 5 to 20 seconds. Past
+  roughly 30 seconds, waiting longer buys almost nothing, and a minute would add 30 seconds of
+  delay to one task in five. With real data the threshold should come from the measured 99th
+  percentile of return times.
+- **What it buys.** One request in five never returns, and in the simulator each request's fate
+  is independent of the last (a hash of the seed and the request id). So the share of tasks that
+  need a person for this reason alone falls from 20% today to 4% with one retry (0.2 x 0.2) and
+  0.8% with two (0.2 x 0.2 x 0.2). Tasks with no eligible contributor still need a person either
+  way.
+- **Two guards a real system needs.** If requests wait in a queue, start the clock when the
+  engine picks a request up, not when it is submitted; otherwise a busy queue makes healthy
+  requests look lost and the retries add load exactly when it hurts. And tell one lost request
+  from a disruption by the share of pending requests past the window: about 20% is normal, far
+  above that means stop retrying and tell the operator.
+- **One trade-off already made on purpose.** A superseded request that later returns a usable
+  match is still discarded. Taking the first valid answer would be faster, but superseding is
+  simpler to explain and stays correct with "route again without the last person".
+
 ## Left out on purpose
 
 - **Work after acceptance.** The brief says routing is complete once a contributor accepts, so
   there is no in-progress or done tracking.
 - **Automatic retries and timeouts.** A pending request is unknown, and the app does not turn
-  unknown into failed. A bounded, opt-in retry policy that supersedes the old request in the same
-  transaction is the first thing I would add next.
+  unknown into failed. The retry policy I would add next is described above.
 - **Contributor screens and sign-in.** Contributor replies come from the simulation panel. There
   is one operator and no accounts.
 - **A real matching algorithm.** The simulator picks the least loaded eligible contributor. The
