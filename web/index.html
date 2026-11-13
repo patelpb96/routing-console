@@ -3,39 +3,78 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Routing console</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <h1>Routing console</h1>
-  <p id="status" role="status"></p>
+  <header class="top">
+    <div>
+      <h1>Routing console</h1>
+      <p class="small muted"><span id="boot">Loading</span> · <span id="conn">Connecting</span></p>
+    </div>
+    <dl id="counts" class="counts"></dl>
+  </header>
 
-  <form id="create">
-    <fieldset>
-      <legend>New task</legend>
-      <label>Title <input name="title" required maxlength="200"></label>
-      <label>Area <select name="area"></select></label>
-      <label>Priority
-        <select name="priority">
-          <option value="normal">normal</option>
-          <option value="high">high</option>
-        </select>
-      </label>
-      <label><input type="checkbox" name="submit"> Submit for assignment</label>
-      <button type="submit">Create task</button>
-    </fieldset>
-  </form>
+  <div class="msgbar">
+    <p id="msg" role="status" aria-live="polite"></p>
+    <button id="msg-close" type="button" hidden>Dismiss</button>
+  </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Title</th><th>Area</th><th>Priority</th><th>State</th><th>Since created</th>
-        <th>Actions</th><th>Simulation</th>
-      </tr>
-    </thead>
-    <tbody id="tasks"></tbody>
-  </table>
+  <main class="layout">
+    <div class="col">
+      <section aria-labelledby="queue-h" class="panel o-queue">
+        <h2 id="queue-h">Needs you</h2>
+        <p class="small muted">Tasks waiting for a decision, and requests past the engine's normal window.
+          High priority first, then longest waiting.</p>
+        <ul id="queue" class="rows"></ul>
+      </section>
+
+      <section aria-labelledby="tasks-h" class="panel o-tasks">
+        <h2 id="tasks-h">All tasks</h2>
+        <ul id="tasks" class="rows"></ul>
+      </section>
+
+      <section aria-labelledby="new-h" class="panel o-new">
+        <h2 id="new-h">New task</h2>
+        <form id="create" class="stack">
+          <label class="f">Title <input name="title" required maxlength="200" autocomplete="off"></label>
+          <div class="pair">
+            <label class="f">Area <select name="area" required></select></label>
+            <label class="f">Priority
+              <select name="priority">
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+          <label class="check"><input type="checkbox" name="submit"> Submit for assignment now</label>
+          <fieldset class="sim inset">
+            <legend>Simulation</legend>
+            <label class="f">Engine scenario for this task <select id="create-scenario" name="scenario"></select></label>
+          </fieldset>
+          <button type="submit" class="primary">Create task</button>
+        </form>
+      </section>
+
+      <section aria-labelledby="people-h" class="panel o-people">
+        <h2 id="people-h">Contributors</h2>
+        <ul id="people" class="people"></ul>
+      </section>
+    </div>
+
+    <div class="col side">
+      <section id="detail" class="panel o-detail" aria-labelledby="detail-h"></section>
+
+      <section id="sim" class="panel sim o-sim" aria-labelledby="sim-h">
+        <h2 id="sim-h">Simulation</h2>
+        <p class="small">Stands in for the engine and the contributors. Not operator actions.</p>
+        <div id="sim-body" class="stack"></div>
+      </section>
+    </div>
+  </main>
 
   <script src="/app.js"></script>
+  <script src="/sim.js"></script>
 </body>
 </html>
