@@ -102,7 +102,8 @@ function paint(node, at) {
   if (show === "ago" || show === "elapsed") node.textContent = dur(ms);
   else if (show === "sentence") node.textContent = sentence(ms);
   else if (show === "advice") node.textContent = past
-    ? "Your call: keep waiting, route again, or assign someone by hand."
+    ? (node.dataset.assign === "1" ? "Your call: keep waiting, route again, or assign someone by hand."
+      : "Your call: keep waiting or route again. Nobody who works in this area has room to assign by hand.")
     : "The engine is looking for a contributor. Nothing to do yet.";
   else if (show === "window") {
     node.textContent = past ? "Past the normal window" : ms < win.min ? "Before the normal window" : "Within the normal window";
@@ -345,20 +346,27 @@ async function command(t, type, extra) {
 function nextStep(t) {
   const step = (text, primary = null) => ({ text: el("p", { class: "next" }, text), primary });
   const who = (t.active_assignment && names.get(t.active_assignment.contributor_id)) || "The contributor";
-  if (t.state === "unassigned") return step("Not sent to the engine yet. Submit it when it is ready, or assign someone by hand.", "submit");
+  // Only name the options this task really has: assigning needs the command and someone with room.
+  const canAssign = t.allowed_commands.includes("assign") && t.assignable_contributor_ids.length > 0;
+  const orAssign = canAssign ? ", or assign someone by hand" : "";
+  if (t.state === "unassigned") return step("Not sent to the engine yet. Submit it when it is ready.", "submit");
   if (t.state === "routing" && t.pending_request) {
-    const node = timed("advice", t.pending_request.started_at_ms, "p");
-    node.classList.add("next");
+    const node = el("p", { class: "next", "data-show": "advice", "data-started": t.pending_request.started_at_ms,
+      "data-assign": canAssign ? "1" : "0" });
+    paint(node, now());
     return { text: node, primary: null };
   }
   if (t.state === "offered") return step(`Waiting for ${who} to accept. Nothing to do yet.`);
   if (t.state === "assigned") return step(`${who} has accepted. Routing is complete.`);
   if (t.state === "closed") return step("Closed. Nothing more can happen to this task.");
   if (t.state !== "needs_attention") return step("Nothing to do yet.");
-  if (t.attention_reason === "no_match") return step("The engine found nobody. Assign someone by hand, or close the task.", "assign");
-  if (t.attention_reason === "selection_unavailable") return step("The engine's pick filled up first. Route again, or assign someone by hand.", "route_again");
-  if (t.attention_reason === "declined") return step("The contributor declined. Route again without them, or assign someone by hand.", "route_again");
-  return step("The offer could not be delivered. Route again without them, or assign someone by hand.", "route_again");
+  if (t.attention_reason === "no_match") {
+    return canAssign ? step("The engine found nobody. Assign someone by hand, or close the task.", "assign")
+      : step("The engine found nobody, and nobody who works in this area has room. Route again later, or close the task.");
+  }
+  if (t.attention_reason === "selection_unavailable") return step(`The engine's pick filled up first. Route again${orAssign}.`, "route_again");
+  if (t.attention_reason === "declined") return step(`The contributor declined. Route again without them${orAssign}.`, "route_again");
+  return step(`The offer could not be delivered. Route again without them${orAssign}.`, "route_again");
 }
 
 // One form for the whole decision: one reason, shared by every action that needs one.
@@ -369,7 +377,8 @@ function actions(t, snap, primary) {
   const button = (cmd, text) => el("button", { type: "submit", name: "cmd", value: cmd, "data-key": `${k}-${cmd}-go`,
     class: cmd === primary ? "primary" : null }, text || label("command", cmd));
   const parts = [];
-  const reasoned = allowed.filter((c) => c !== "close" && needsReason(c, t));
+  const usable = (c) => c !== "close" && (c !== "assign" || t.assignable_contributor_ids.length > 0);
+  const reasoned = allowed.filter((c) => usable(c) && needsReason(c, t));
   if (reasoned.length) {
     const verbs = reasoned.map((c) => label("command", c).replace(/ by hand$/, "").toLowerCase());
     const list = verbs.length > 1 ? `${verbs.slice(0, -1).join(", ")} or ${verbs.at(-1)}` : verbs[0];

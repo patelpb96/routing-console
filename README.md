@@ -194,7 +194,7 @@ corrections are in [docs/agent-ledger.md](docs/agent-ledger.md), one row per tas
 
 ## Known gaps
 
-- Four files are over the 400-line guide (`web/app.js` 487, `src/app.rs` 482,
+- Four files are over the 400-line guide (`web/app.js` 496, `src/app.rs` 482,
   `src/domain/rows.rs` 453, `tests/use_cases.rs` 427). Left as they are rather than split late.
 - Reset (simulation panel) is not atomic with seeding: a command sent in the instant between the
   wipe and the reseed could land on an empty board.

@@ -59,7 +59,7 @@ not fill gaps with guesses.
 
 - Checker rule 3 knows four build-folder names (`node_modules`, `target`, `dist`, `build`); the brief says "any build output". Other names (`out`, `bin`, `.next`, `coverage`) are not detected. Not blocking: this project produces only `target/`.
 - Machine setup, not project code: one Visual Studio Build Tools install lacks `vcruntime.lib`, and project-built programs cannot write to the system temp folder. It also lacks `immintrin.h` and `oldnames.lib`. Worked around in `.cargo/config.toml` and by keeping scratch files under `target/`. On this machine the first build after `cargo clean` must be `cargo check-all` (it points the C compiler's temp folder inside the project); after that a plain `cargo run` works. The author may want to look at the cause.
-- Four files are over the 400-line guide: `web/app.js` 487, `src/app.rs` 482, `src/domain/rows.rs` 453, `tests/use_cases.rs` 427. Warn-only by the standing rule.
+- Four files are over the 400-line guide: `web/app.js` 496, `src/app.rs` 482, `src/domain/rows.rs` 453, `tests/use_cases.rs` 427. Warn-only by the standing rule.
 - Reset is not atomic with seeding: a command sent between the wipe and the reseed could land on the empty board. And if a reset's transaction rolled back, results from before the attempt would be dropped. Both are simulation-panel edge cases outside the four use cases.
 - A reason or contributor picked in the assign form is kept as a draft and reappears in the reassign form after the task changes state. Cosmetic.
 - The checker's secret scan is pattern based and its company-name rule needs the name supplied on the command line; neither is a guarantee.
