@@ -1,8 +1,15 @@
 [alias]
 check-all = "run -q -p check-all --"
 
-# Windows only: link the C runtime statically. One Visual Studio Build Tools install on the
-# development machine ships libvcruntime.lib but not vcruntime.lib, so the default (dynamic)
-# link fails with LNK1104. Static linking needs no extra setup and has no effect on macOS or Linux.
+# The next two blocks work around one incomplete Visual Studio Build Tools install on the
+# development machine (no vcruntime.lib, oldnames.lib or immintrin.h). Each is harmless on a
+# complete toolchain and does nothing on macOS or Linux.
+
+# Bundled SQLite: skip compiler intrinsics, so sqlite3.c does not need immintrin.h.
+[env]
+LIBSQLITE3_FLAGS = "-DSQLITE_DISABLE_INTRINSIC"
+
+# Windows only: link the C runtime statically (libvcruntime.lib is present, vcruntime.lib is not)
+# and do not ask for oldnames.lib, which nothing here uses.
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/NODEFAULTLIB:oldnames.lib"]

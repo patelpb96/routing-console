@@ -9,3 +9,6 @@ build/
 
 # Packed submission and raw session exports are assembled here, never committed.
 submission/
+
+# Local agent tooling (dev-server launch config), not part of the product.
+.claude/

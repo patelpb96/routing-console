@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Routing console</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>Routing console</h1>
+  <p id="status" role="status"></p>
+
+  <form id="create">
+    <fieldset>
+      <legend>New task</legend>
+      <label>Title <input name="title" required maxlength="200"></label>
+      <label>Area <select name="area"></select></label>
+      <label>Priority
+        <select name="priority">
+          <option value="normal">normal</option>
+          <option value="high">high</option>
+        </select>
+      </label>
+      <label><input type="checkbox" name="submit"> Submit for assignment</label>
+      <button type="submit">Create task</button>
+    </fieldset>
+  </form>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Title</th><th>Area</th><th>Priority</th><th>State</th><th>Since created</th>
+        <th>Actions</th><th>Simulation</th>
+      </tr>
+    </thead>
+    <tbody id="tasks"></tbody>
+  </table>
+
+  <script src="/app.js"></script>
+</body>
+</html>
