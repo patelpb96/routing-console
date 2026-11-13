@@ -109,6 +109,19 @@ pub fn check(before: &Db, after: &Db) -> Result<(), String> {
         if b.state == "closed" && a.state != "closed" {
             return Err(format!("9: task {} left closed", b.id));
         }
+        // A step that sets aside the pending request and opens another while the task stays
+        // routing keeps the old request's exclusions.
+        if let (Some(old), Some(new)) = (before.pending(b.id).first(), after.pending(b.id).first())
+            && b.state == "routing"
+            && a.state == "routing"
+            && old.id != new.id
+            && new.excluded != old.excluded
+        {
+            return Err(format!(
+                "carry: task {} request {} left out {:?}, its successor {} leaves out {:?}",
+                b.id, old.id, old.excluded, new.id, new.excluded
+            ));
+        }
     }
     // 7: a result for a superseded request touches its own row and adds one event, nothing else.
     let new = after.new_events(before);

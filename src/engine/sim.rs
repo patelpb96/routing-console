@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS sim_scenarios (
 );
 "#;
 
+/// Empties the simulator's tables (creating them first on a database that has none yet). For
+/// a start that finds records of an unfinished seeding, before any simulator is armed.
+pub fn clear(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(SIM_SCHEMA)?;
+    conn.execute_batch("DELETE FROM sim_schedule; DELETE FROM sim_scenarios;")
+}
+
 pub struct Simulator {
     store: Store,
     clock: Clock,
@@ -150,7 +157,7 @@ impl Simulator {
         for t in timers.drain(..) {
             t.abort();
         }
-        conn.execute_batch("DELETE FROM sim_schedule; DELETE FROM sim_scenarios;")?;
+        clear(conn)?;
         if let Some(seed) = seed {
             self.seed.store(seed, Ordering::SeqCst);
         }

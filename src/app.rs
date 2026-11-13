@@ -87,8 +87,14 @@ impl App {
                 + 1;
             meta_set(tx, "boot_count", &count.to_string())?;
             meta_set(tx, "boot_started_at_ms", &now.to_string())?;
-            let fresh = crate::seed::tasks_wanted(tx)?;
-            meta_set(tx, crate::seed::TASKS_SEEDED, "1")?;
+            // No marker: seeding never finished (or never ran). Start from scratch, and mark
+            // it only once the seeding below has succeeded. A blank start marks at once.
+            let fresh = !crate::seed::is_seeded(tx)?;
+            if fresh && seed_tasks {
+                crate::seed::clear_tasks(tx)?;
+            } else if fresh {
+                meta_set(tx, crate::seed::TASKS_SEEDED, "1")?;
+            }
             note_restart(tx, count, now)?;
             Ok((
                 seed,
@@ -101,6 +107,7 @@ impl App {
         })?;
         if fresh && seed_tasks {
             crate::seed::tasks(&store, now, seed)?;
+            store.transaction(|tx| Ok(meta_set(tx, crate::seed::TASKS_SEEDED, "1")?))?;
         }
         let (reports, mut incoming) = mpsc::unbounded_channel();
         let sim = Arc::new(Simulator::new(store.clone(), clock.clone(), seed, reports)?);
@@ -146,10 +153,15 @@ impl App {
             if let Some(seed) = seed {
                 meta_set(tx, "seed", &seed.to_string())?;
             }
-            meta_set(tx, crate::seed::TASKS_SEEDED, "1")?;
+            tx.execute(
+                "DELETE FROM meta WHERE key = ?1",
+                [crate::seed::TASKS_SEEDED],
+            )?;
             Ok(())
         })?;
         crate::seed::tasks(&self.store, self.clock.now_ms(), self.sim.seed())?;
+        self.store
+            .transaction(|tx| Ok(meta_set(tx, crate::seed::TASKS_SEEDED, "1")?))?;
         // The seeder leaves nothing due, but a report it left waiting must still arrive.
         self.sim.rearm()?;
         self.notify();

@@ -293,3 +293,77 @@ async fn route_again_without_exclude_previous_may_offer_the_decliner_again() {
     assert_eq!(t.state, TaskState::NeedsAttention);
     assert_eq!(t.attention_reason, Some(AttentionReason::NoMatch));
 }
+
+/// The stored `excluded` list of a request row, as ids.
+fn excluded_of(store: &Store, request_id: i64) -> Vec<i64> {
+    let text: String = store
+        .transaction(|tx| {
+            Ok(tx.query_row(
+                "SELECT excluded FROM routing_requests WHERE id = ?1",
+                [request_id],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn route_again_while_routing_keeps_leaving_out_the_decliner() {
+    // Grace is the only healthcare contributor, so whether the engine may pick her decides
+    // the outcome: offered to her again, or no match.
+    let store = Store::open_in_memory().unwrap();
+    let grace = store
+        .transaction(|tx| {
+            Ok(write::insert_contributor(
+                tx,
+                "Grace Lin",
+                &[Area::Healthcare],
+                2,
+            )?)
+        })
+        .unwrap();
+    let app = App::start_blank(store.clone(), Clock::system()).unwrap();
+    let t = submitted(&app, "Ward rota", "healthcare", "fast_match");
+    advance_ms(FAST).await;
+    let t = app.task(t.id).unwrap();
+    assert_eq!(t.active_assignment.clone().unwrap().contributor_id, grace);
+
+    // Grace declines; route again leaving her out. The engine is slow.
+    let d = reply(&app, &t, "decline");
+    app.set_scenario(t.id, "slow_match").unwrap();
+    let r = app.command(t.id, exclude_previous(d.version)).unwrap();
+    let first = r.pending_request.clone().unwrap().id;
+    assert_eq!(excluded_of(&store, first), vec![grace]);
+    advance_ms(21_000).await;
+    let r = app.task(t.id).unwrap();
+    assert_eq!(r.state, TaskState::Routing);
+
+    // Too slow: route again. The new request still leaves Grace out.
+    app.set_scenario(t.id, "fast_match").unwrap();
+    let again = app
+        .command(
+            t.id,
+            with_reason("route_again", r.version, "engine_too_slow"),
+        )
+        .unwrap();
+    let second = again.pending_request.clone().unwrap().id;
+    assert_ne!(second, first);
+    assert_eq!(request_row(&store, first).0, "superseded");
+    assert_eq!(excluded_of(&store, second), vec![grace]);
+    let rerouted = again.events.last().unwrap();
+    assert_eq!(rerouted.data["excluded"], serde_json::json!([grace]));
+    assert!(
+        rerouted.summary.contains("leaving out Grace Lin"),
+        "{}",
+        rerouted.summary
+    );
+
+    // The engine's candidates leave her out too: with nobody else, it answers no match.
+    advance_ms(FAST).await;
+    let t = app.task(t.id).unwrap();
+    assert_eq!(request_row(&store, second).1.as_deref(), Some("no_match"));
+    assert_eq!(t.state, TaskState::NeedsAttention);
+    assert_eq!(t.attention_reason, Some(AttentionReason::NoMatch));
+    assert_eq!(offered_to(&store, t.id), vec![grace]);
+}

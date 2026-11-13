@@ -72,6 +72,30 @@ fn route_again_supersedes_opens_and_bumps_the_version() {
 }
 
 #[test]
+fn route_again_while_routing_keeps_the_superseded_requests_exclusions() {
+    let mut f = routing_facts();
+    f.pending.as_mut().unwrap().excluded = vec![7];
+    f.turned_down = vec![TurnedDown {
+        contributor_id: 7,
+        name: "Grace Lin".into(),
+    }];
+    let d = decide(&f, &route_again(SLOW, false, 3)).unwrap();
+    assert_eq!(
+        d.changes,
+        vec![
+            Change::SupersedeRequest { request_id: 7 },
+            Change::OpenRequest { excluded: vec![7] }
+        ]
+    );
+    let e = &d.events[0];
+    assert_eq!(e.data["excluded"], serde_json::json!([7]));
+    assert!(e.summary.contains("leaving out Grace Lin"), "{}", e.summary);
+    // With nobody left out the summary stays as it was.
+    let d = decide(&routing_facts(), &route_again(SLOW, false, 3)).unwrap();
+    assert!(!d.events[0].summary.contains("leaving out"));
+}
+
+#[test]
 fn route_again_refuses_a_missing_code_and_exclude_previous() {
     assert!(refused(decide(&routing_facts(), &route_again(None, false, 3))).contains("reason"));
     refused(decide(&routing_facts(), &route_again(SLOW, true, 3)));

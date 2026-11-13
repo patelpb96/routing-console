@@ -13,9 +13,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::watch;
 use tokio_stream::Stream;
 use tokio_stream::StreamExt as _;
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 
 use crate::app::{App, CommandInput, CreateTask};
 use crate::error::AppError;
@@ -27,7 +28,10 @@ const STYLE_CSS: &str = include_str!("../web/style.css");
 
 type Shared = State<Arc<App>>;
 
-pub fn router(app: Arc<App>) -> Router {
+/// Turns true once shutdown begins; every open event stream ends when it does.
+type Closing = axum::Extension<watch::Receiver<bool>>;
+
+fn router(app: Arc<App>, closing: watch::Receiver<bool>) -> Router {
     Router::new()
         .route("/", get(|| page("text/html; charset=utf-8", INDEX_HTML)))
         .route(
@@ -50,7 +54,25 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/sim/assignments/{id}/reply", post(reply))
         .route("/api/sim/tasks/{id}/scenario", post(scenario))
         .route("/api/sim/reset", post(reset))
+        .layer(axum::Extension(closing))
         .with_state(app)
+}
+
+/// Serves the app on `listener` until `shutdown` completes. Then it stops taking connections,
+/// ends every open event stream (they never finish on their own), and waits for the requests
+/// still in flight to finish.
+pub async fn serve(
+    listener: tokio::net::TcpListener,
+    app: Arc<App>,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    let (close, closing) = watch::channel(false);
+    axum::serve(listener, router(app, closing))
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            let _ = close.send(true);
+        })
+        .await
 }
 
 async fn page(content_type: &'static str, body: &'static str) -> Response {
@@ -75,9 +97,18 @@ async fn overrides(State(app): Shared) -> Result<Response, AppError> {
         .into_response())
 }
 
-async fn events(State(app): Shared) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+async fn events(
+    State(app): Shared,
+    axum::Extension(closing): Closing,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     // A lagged receiver missed some signals, which still means "changed", so every item counts.
-    let stream = BroadcastStream::new(app.subscribe())
+    let changes = BroadcastStream::new(app.subscribe()).map(|_| Some(()));
+    // One `None` once shutdown has begun; the watch stream yields the current value first, so a
+    // stream opened after that ends at once.
+    let close = WatchStream::new(closing).filter_map(|closed| closed.then_some(None));
+    let stream = changes
+        .merge(close)
+        .take_while(Option::is_some)
         .map(|_| Ok(Event::default().event("changed").data("{}")));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

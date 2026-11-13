@@ -145,6 +145,7 @@ test (blocking), and runs three repository rules (warnings only: allowed file ty
 | `src/domain/tests/` | Every row of the transition table and its refusals, with no database. |
 | `tests/happy_path.rs`, `tests/unresolved.rs`, `tests/recovery.rs` | Each scenario on tokio's paused clock: 26 seconds of waiting runs in milliseconds and gives the same answer every time. |
 | `tests/use_cases.rs` | The brief's four use cases as four named tests, plus the seed states and reset. |
+| `tests/shutdown.rs` | On real time: stopping the server ends an open event stream and the server exits within seconds. |
 | `tests/overrides.rs` | The override export: the late-return story before and after the engine answers, and every command that does or does not produce a line. |
 | `tests/restart.rs` | A real database file, the app stopped and started again: pending requests survive, overdue results are delivered, a late result after a restart is still not applied. |
 | `tests/invariants/` | Random command runs. A seeded generator fires operator commands (right and stale versions), contributor replies, scenario changes, clock jumps and restarts; after every step nine invariants from `docs/contract.md` are checked against the tables with SQL, and the snapshot is compared with the tables. Default 150 seeds of 80 steps; `INVARIANT_SEEDS` and `INVARIANT_STEPS` raise it. |
@@ -177,8 +178,8 @@ corrections are in [docs/agent-ledger.md](docs/agent-ledger.md), one row per tas
 
 ## Known gaps
 
-- Four files are over the 400-line guide (`web/app.js` 447, `src/app.rs` 436,
-  `src/domain/rows.rs` 429, `tests/use_cases.rs` 427). Left as they are rather than split late.
+- Four files are over the 400-line guide (`web/app.js` 447, `src/app.rs` 448,
+  `src/domain/rows.rs` 453, `tests/use_cases.rs` 427). Left as they are rather than split late.
 - Reset (simulation panel) is not atomic with seeding: a command sent in the instant between the
   wipe and the reseed could land on an empty board.
 - A crash between committing a new request and handing it to the engine leaves a request the
@@ -186,6 +187,18 @@ corrections are in [docs/agent-ledger.md](docs/agent-ledger.md), one row per tas
   which is the case the product is built for, but nothing resends it.
 - A value picked in the assign form is kept as a draft and can reappear in the reassign form
   after the task changes state.
+- If handing a new request to the engine fails after the command has committed, the reply is an
+  error although the task is already routing; the request then behaves like one that never
+  answers.
+- Redaction of the packed session copies covers key-shaped strings, email addresses and
+  home-folder paths. The machine's user name can still appear in other forms (a dashed project
+  folder name, a `DOMAIN
+ame` account), so "personal-info: PASS" does not mean the name is gone.
+- No automated tests for the HTTP layer itself (status codes, the event stream's content); it was
+  exercised by hand and through the browser. Every snapshot carries every task's full history,
+  which is fine for a seed-sized board and would need paging beyond it. The server's clock reads
+  wall time once at start and then counts monotonic time, so it can fall behind after the machine
+  sleeps.
 - The page was verified in one browser engine (Chromium), in light and dark and at 360 px width.
   No screen-reader pass.
 - The submission checker knows four build-folder names (`node_modules`, `target`, `dist`,

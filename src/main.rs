@@ -30,10 +30,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "routing-console: serving http://localhost:{port} with database {}",
         db.display()
     );
-    axum::serve(listener, http::router(app))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
+    http::serve(listener, app, async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await?;
     Ok(())
 }

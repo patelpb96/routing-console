@@ -81,7 +81,12 @@ pub fn decide(facts: &TaskFacts, cmd: &Command) -> Result<Decision, Refusal> {
                 ));
             }
             let code = required(*reason_code, OperatorKind::RouteAgain)?;
-            Ok(rows::route_again(pending(facts)?, code, note))
+            Ok(rows::route_again(
+                pending(facts)?,
+                &facts.turned_down,
+                code,
+                note,
+            ))
         }
         (
             Routing,

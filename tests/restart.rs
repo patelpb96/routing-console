@@ -6,7 +6,8 @@ mod common;
 use common::*;
 use routing_console::app::App;
 use routing_console::clock::Clock;
-use routing_console::domain::{Actor, EventKind, TaskState};
+use routing_console::domain::{Actor, AttentionReason, EventKind, TaskState};
+use routing_console::seed;
 
 #[tokio::test(start_paused = true)]
 async fn restart_before_the_due_time_notes_it_then_applies_the_result() {
@@ -149,4 +150,109 @@ async fn a_restart_with_the_seeded_board_does_not_seed_it_twice() {
         .map(|t| t.title.as_str())
         .collect();
     assert_eq!(noted, vec![routing_console::seed::HEALTHCARE]);
+}
+
+/// Row counts of the record tables and the simulator's schedule.
+fn counts(db: &TempDb) -> [i64; 5] {
+    let store = db.open();
+    store
+        .transaction(|tx| {
+            let n = |table: &str| -> rusqlite::Result<i64> {
+                tx.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            };
+            Ok([
+                n("tasks")?,
+                n("routing_requests")?,
+                n("assignments")?,
+                n("events")?,
+                n("sim_schedule")?,
+            ])
+        })
+        .unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_database_without_the_seed_marker_is_cleared_and_seeded_from_scratch() {
+    // Two tasks left behind by a start that never finished seeding: the marker is missing.
+    let db = TempDb::new("restart-unmarked");
+    let clock = Clock::system();
+    let app = App::start_blank(db.open(), clock.clone()).unwrap();
+    submitted(&app, "Leftover routing", "finance", "never_returns");
+    let left = submitted(&app, "Leftover offered", "finance", "fast_match");
+    advance_ms(6_000).await;
+    assert_eq!(app.task(left.id).unwrap().state, TaskState::Offered);
+    drop(app);
+    settle().await;
+    db.open()
+        .transaction(|tx| Ok(tx.execute("DELETE FROM meta WHERE key = 'tasks_seeded'", [])?))
+        .unwrap();
+
+    let app = App::start(db.open(), clock.clone()).unwrap();
+    let snap = app.snapshot().unwrap();
+    let mut titles: Vec<&str> = snap.tasks.iter().map(|t| t.title.as_str()).collect();
+    titles.sort();
+    let mut want = vec![
+        seed::HEALTHCARE,
+        seed::RED_TEAM,
+        seed::INTERVIEW,
+        seed::TICKETS,
+        seed::SURVEY,
+        seed::DAIRY,
+    ];
+    want.sort();
+    assert_eq!(titles, want);
+    let state = |title: &str| {
+        let t = snap.tasks.iter().find(|t| t.title == title).unwrap();
+        (t.state, t.attention_reason)
+    };
+    assert_eq!(state(seed::HEALTHCARE), (TaskState::Routing, None));
+    assert_eq!(
+        state(seed::RED_TEAM),
+        (TaskState::NeedsAttention, Some(AttentionReason::Declined))
+    );
+    assert_eq!(state(seed::INTERVIEW), (TaskState::Assigned, None));
+    assert_eq!(state(seed::TICKETS), (TaskState::Offered, None));
+    assert_eq!(state(seed::SURVEY), (TaskState::Unassigned, None));
+    assert_eq!(
+        state(seed::DAIRY),
+        (TaskState::NeedsAttention, Some(AttentionReason::NoMatch))
+    );
+    // Nothing of the leftovers survives: no restart notes, no loads from their offers.
+    assert!(
+        snap.tasks
+            .iter()
+            .all(|t| count(t, EventKind::ServerRestarted) == 0)
+    );
+    let fresh = TempDb::new("restart-unmarked-fresh");
+    let reference = App::start(fresh.open(), clock.clone()).unwrap();
+    let loads = |s: &routing_console::snapshot::Snapshot| -> Vec<(i64, i64)> {
+        s.contributors
+            .iter()
+            .map(|c| (c.id, c.active_load))
+            .collect()
+    };
+    assert_eq!(loads(&snap), loads(&reference.snapshot().unwrap()));
+    drop(app);
+    drop(reference);
+    settle().await;
+    assert_eq!(counts(&db), counts(&fresh));
+
+    // And it is marked now: the next start keeps the same six.
+    let app = App::start(db.open(), clock.clone()).unwrap();
+    assert_eq!(app.snapshot().unwrap().tasks.len(), 6);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_blank_database_stays_blank_across_restarts() {
+    let db = TempDb::new("restart-blank");
+    let clock = Clock::system();
+    let app = App::start_blank(db.open(), clock.clone()).unwrap();
+    assert!(app.snapshot().unwrap().tasks.is_empty());
+    let app = restart(app, &db, &clock).await; // `start`, not `start_blank`
+    assert!(app.snapshot().unwrap().tasks.is_empty());
+    let app = restart(app, &db, &clock).await;
+    let snap = app.snapshot().unwrap();
+    assert!(snap.tasks.is_empty());
+    assert_eq!(snap.contributors.len(), 8);
+    assert_eq!(snap.boot.count, 3);
 }

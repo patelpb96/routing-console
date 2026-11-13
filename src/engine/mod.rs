@@ -7,6 +7,7 @@
 mod sim;
 
 pub use sim::Simulator;
+pub(crate) use sim::clear as clear_sim_tables;
 
 use crate::domain::{Area, EngineResult, Priority, vocab};
 use crate::error::AppError;
@@ -91,10 +92,16 @@ pub fn plan(seed: u64, request_id: i64, scenario: Scenario, eligible: &[Candidat
     Plan { delay_ms, result }
 }
 
-/// Lowest active load wins; a tie is broken by the hash so it does not always favour low ids.
+/// Among the candidates with room when the request starts, lowest active load wins; a tie is
+/// broken by the hash so it does not always favour low ids. Nobody with room: `None`. (Room can
+/// still run out before the result is applied; the app checks again then.)
 fn least_loaded(eligible: &[Candidate], hash: u64) -> Option<i64> {
-    let min = eligible.iter().map(|c| c.active_load).min()?;
-    let ties: Vec<i64> = eligible
+    let room: Vec<&Candidate> = eligible
+        .iter()
+        .filter(|c| c.active_load < c.capacity)
+        .collect();
+    let min = room.iter().map(|c| c.active_load).min()?;
+    let ties: Vec<i64> = room
         .iter()
         .filter(|c| c.active_load == min)
         .map(|c| c.id)
@@ -148,6 +155,37 @@ mod tests {
             plan(42, 1, Scenario::FastMatch, &[]).result,
             EngineResult::NoMatch
         );
+    }
+
+    fn full(id: i64, load: i64, capacity: i64) -> Candidate {
+        Candidate {
+            id,
+            active_load: load,
+            capacity,
+        }
+    }
+
+    #[test]
+    fn a_full_contributor_is_never_picked_while_another_has_room() {
+        // 1 has the lowest load but no room; 2 carries more and still has room.
+        let list = [full(1, 1, 1), full(2, 2, 3), full(3, 0, 0)];
+        for id in 1..=200 {
+            for s in [Scenario::FastMatch, Scenario::SlowMatch, Scenario::Auto] {
+                let r = plan(42, id, s, &list).result;
+                assert!(
+                    r == EngineResult::Match(2) || plan(42, id, s, &list).delay_ms.is_none(),
+                    "request {id} {s:?}: {r:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn all_full_gives_no_match() {
+        let list = [full(1, 1, 1), full(2, 2, 2)];
+        for s in [Scenario::FastMatch, Scenario::SlowMatch] {
+            assert_eq!(plan(42, 1, s, &list).result, EngineResult::NoMatch);
+        }
     }
 
     #[test]

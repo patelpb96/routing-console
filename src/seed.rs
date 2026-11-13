@@ -35,7 +35,8 @@ pub const TICKETS: &str = "Label 300 support tickets by root cause";
 pub const SURVEY: &str = "Survey on warehouse shift scheduling tools";
 pub const DAIRY: &str = "Annotate dairy-herd sensor clips for lameness";
 
-/// Meta key set once a database has had its chance to be seeded with tasks.
+/// Meta key set only once seeding the six tasks has finished, or by a blank start that wants
+/// none. Without it a start treats the database as never seeded.
 pub const TASKS_SEEDED: &str = "tasks_seeded";
 
 /// How far before "now" the seeded history starts, and when the healthcare request starts.
@@ -53,10 +54,18 @@ pub fn contributors_if_empty(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// True for a database that has never been seeded with tasks and holds none.
-pub fn tasks_wanted(conn: &Connection) -> rusqlite::Result<bool> {
-    let tasks: i64 = conn.query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))?;
-    Ok(tasks == 0 && meta_get(conn, TASKS_SEEDED)?.is_none())
+pub fn is_seeded(conn: &Connection) -> rusqlite::Result<bool> {
+    Ok(meta_get(conn, TASKS_SEEDED)?.is_some())
+}
+
+/// Removes every task record a start that never finished seeding may have left: tasks,
+/// requests, assignments, events and the simulator's rows. Contributors and meta stay.
+pub fn clear_tasks(conn: &Connection) -> rusqlite::Result<()> {
+    crate::engine::clear_sim_tables(conn)?;
+    conn.execute_batch(
+        "DELETE FROM events; DELETE FROM assignments; DELETE FROM routing_requests;
+         DELETE FROM tasks;",
+    )
 }
 
 /// Replays the seeded history, ending with the healthcare request started

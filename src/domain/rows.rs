@@ -56,23 +56,47 @@ pub fn submit(note: &Option<String>) -> Decision {
 }
 
 /// Routing to routing. The pending request changes, so by contract section 2 the version goes
-/// up: the elapsed clock another tab was judging has restarted.
-pub fn route_again(old: &PendingRequest, code: ReasonCode, note: &Option<String>) -> Decision {
+/// up: the elapsed clock another tab was judging has restarted. The new request keeps the old
+/// one's `excluded` list; `turned_down` supplies the names for the summary.
+pub fn route_again(
+    old: &PendingRequest,
+    turned_down: &[TurnedDown],
+    code: ReasonCode,
+    note: &Option<String>,
+) -> Decision {
+    let ids = old.excluded.clone();
+    let names: Vec<String> = ids
+        .iter()
+        .map(|id| {
+            turned_down
+                .iter()
+                .find(|t| t.contributor_id == *id)
+                .map_or_else(|| format!("contributor {id}"), |t| t.name.clone())
+        })
+        .collect();
+    let names_ref: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut summary = format!(
+        "Routed again ({}); the earlier engine request is set aside",
+        code.label()
+    );
+    if !names.is_empty() {
+        summary.push_str(&format!(", still leaving out {}", and_list(&names_ref)));
+    }
+    summary.push('.');
     moves_to(
         TaskState::Routing,
         vec![
             Change::SupersedeRequest { request_id: old.id },
-            Change::OpenRequest { excluded: vec![] },
+            Change::OpenRequest {
+                excluded: ids.clone(),
+            },
         ],
         event(
             EventKind::OperatorRerouted,
             Actor::Operator,
-            format!(
-                "Routed again ({}); the earlier engine request is set aside.",
-                code.label()
-            ),
-            json!({"superseded_request_id": old.id, "reason_code": code, "excluded": [],
-                   "note": note}),
+            summary,
+            json!({"superseded_request_id": old.id, "reason_code": code, "excluded": ids,
+                   "excluded_names": names, "note": note}),
         ),
     )
 }

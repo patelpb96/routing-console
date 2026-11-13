@@ -33,7 +33,7 @@ record changes to write, or a refusal with a reason. No IO, no clock reads.
 | Command | From | To | Rules |
 |---|---|---|---|
 | `submit` | unassigned | routing | Opens a pending request and hands it to the engine. |
-| `route_again` | routing | routing | Needs a reason code. The pending request becomes superseded; a new one opens. |
+| `route_again` | routing | routing | Needs a reason code. The pending request becomes superseded; a new one opens and keeps the excluded list of the one it replaces. |
 | `route_again` | needs_attention | routing | No reason code needed. `exclude_previous: true` leaves out every contributor whose offer for this task was declined or failed. |
 | `cancel_routing` | routing | unassigned | Needs a reason code. The pending request becomes superseded. |
 | `assign` | routing | offered | Needs a reason code. The pending request becomes superseded. |
@@ -81,7 +81,9 @@ The simulator:
 
 - decides each request's outcome from a hash of the seed and the request id, never from call order;
 - in `auto`: 20 in 100 never return; the rest return after 5 to 20 seconds with the least loaded
-  eligible contributor, or no match when the list is empty;
+  eligible contributor who has room when the request starts, or no match when nobody eligible
+  has room. So `selection_unavailable` only comes from a real race: the pick had room when the
+  request started and is full when the result lands;
 - per-task scenarios override that: `fast_match` (6 s), `slow_match` (26 s), `no_match` (8 s),
   `never_returns`;
 - writes each decision to `sim_schedule` when the request starts, and on start-up re-arms every
@@ -89,6 +91,9 @@ The simulator:
   have kept running while the app was down.
 
 On start-up the app writes one `server_restarted` event on every task that has a pending request.
+
+Stopping the server ends every open event stream, so Ctrl+C returns promptly even while a page
+is open.
 
 ## 4. Invariants (checked after every step of the random command runs)
 
@@ -176,7 +181,9 @@ so the page can ignore reply bodies and always redraw from the snapshot. Event k
 ## 6. Running
 
 `cargo run` starts everything: it creates `routing-console.db` in the working directory if it is
-missing, seeds it when empty, and serves `http://localhost:3000`. `PORT` and `ROUTING_DB` override
+missing, seeds it when empty, and serves `http://localhost:3000`. A database is marked as seeded only
+after the seed has finished; a start that finds no mark clears whatever an interrupted seed left
+and seeds again. `PORT` and `ROUTING_DB` override
 the port and the database path. The page's files are compiled into the binary with `include_str!`.
 
 ## 7. Seed
