@@ -112,6 +112,14 @@ disagreement; it is recorded as no answer yet. This was the plan's stretch item.
 **The browser holds no state.** One render function draws everything from one server snapshot;
 server-sent events tell the page to fetch it again. A refresh changes nothing.
 
+**The detail view says what to do next.** Each task opens with one sentence on where it stands and
+what the operator can do, and the actions sit in one form with one shared reason. The likely action
+is highlighted, except while a request is waiting: unknown is not failure, so waiting stays an
+equal choice. The page uses a warm theme with square corners in light and dark. "Past the normal
+window" is yellow and hatched, so it does not depend on telling two warm colours apart. The
+simulation panel is dashed, plum coloured and can be folded away, so it never reads as an operator
+control.
+
 The rules above are written as a testable contract in [docs/contract.md](docs/contract.md).
 
 ## Assumptions
@@ -186,7 +194,7 @@ corrections are in [docs/agent-ledger.md](docs/agent-ledger.md), one row per tas
 
 ## Known gaps
 
-- Four files are over the 400-line guide (`web/app.js` 447, `src/app.rs` 482,
+- Four files are over the 400-line guide (`web/app.js` 487, `src/app.rs` 482,
   `src/domain/rows.rs` 453, `tests/use_cases.rs` 427). Left as they are rather than split late.
 - Reset (simulation panel) is not atomic with seeding: a command sent in the instant between the
   wipe and the reseed could land on an empty board.

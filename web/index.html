@@ -25,8 +25,8 @@
     <div class="col">
       <section aria-labelledby="queue-h" class="panel o-queue">
         <h2 id="queue-h">Needs you</h2>
-        <p class="small muted">Tasks waiting for a decision, and requests past the engine's normal window.
-          High priority first, then longest waiting.</p>
+        <p class="small muted">Tasks that need a decision, and any still waiting longer than the engine
+          usually takes. High priority first, then longest wait.</p>
         <ul id="queue" class="rows"></ul>
       </section>
 
@@ -67,11 +67,11 @@
     <div class="col side">
       <section id="detail" class="panel o-detail" aria-labelledby="detail-h"></section>
 
-      <section id="sim" class="panel sim o-sim" aria-labelledby="sim-h">
-        <h2 id="sim-h">Simulation</h2>
-        <p class="small">Stands in for the engine and the contributors. Not operator actions.</p>
+      <details id="sim" class="panel sim o-sim" open>
+        <summary><h2 id="sim-h">Simulation</h2>
+          <span class="small muted">Stands in for the engine and the contributors. Demo only.</span></summary>
         <div id="sim-body" class="stack"></div>
-      </section>
+      </details>
     </div>
   </main>
 

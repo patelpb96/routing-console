@@ -101,6 +101,9 @@ function paint(node, at) {
   const show = node.dataset.show;
   if (show === "ago" || show === "elapsed") node.textContent = dur(ms);
   else if (show === "sentence") node.textContent = sentence(ms);
+  else if (show === "advice") node.textContent = past
+    ? "Your call: keep waiting, route again, or assign someone by hand."
+    : "The engine is looking for a contributor. Nothing to do yet.";
   else if (show === "window") {
     node.textContent = past ? "Past the normal window" : ms < win.min ? "Before the normal window" : "Within the normal window";
   } else if (show === "marker") node.style.left = `${(Math.min(ms, SCALE_MS) / SCALE_MS) * 100}%`;
@@ -196,7 +199,8 @@ function drawHeader(snap, queue) {
   const count = (state) => snap.tasks.filter((t) => t.state === state).length;
   const pairs = [["Needs you", queue.length], ["Routing", count("routing")], ["Offered", count("offered")]];
   $("#counts").replaceChildren(...pairs.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, String(v)))));
-  $("#boot").textContent = `Server start number ${snap.boot.count}, running since ${clock(snap.boot.started_at_ms)}`;
+  const since = clock(snap.boot.started_at_ms);
+  $("#boot").textContent = snap.boot.count > 1 ? `Server restarted at ${since}` : `Running since ${since}`;
 }
 
 function taskLink(t, prefix, ...lines) {
@@ -296,6 +300,7 @@ function drawDetail(snap) {
     return;
   }
   const fact = (k, ...v) => el("div", {}, el("dt", {}, k), el("dd", {}, ...v));
+  const next = nextStep(t);
   // Optional parts are null when absent; replaceChildren would print the word "null" for them.
   box.replaceChildren(...[
     el("a", { href: "#", class: "back" }, "Back to the list"),
@@ -304,13 +309,14 @@ function drawDetail(snap) {
     el("dl", { class: "facts" },
       fact("State", stateTag(t), t.attention_reason && ` ${label("attention", t.attention_reason)}`),
       fact("Area", label("area", t.area)), fact("Priority", label("priority", t.priority)),
-      fact("Held by", holder(t) || "Nobody"), fact("Version", String(t.version)),
+      fact("Held by", holder(t) || "Nobody"),
       fact("Created", `${clock(t.created_at_ms)}, `, timed("ago", t.created_at_ms), " ago")),
     t.active_assignment && el("p", { class: "small muted" }, `How: ${label("source", t.active_assignment.source)}` +
       (t.active_assignment.reason_code ? `, reason: ${label("reason", t.active_assignment.reason_code)}.` : ".")),
     t.pending_request && scale(t.pending_request),
-    el("h3", {}, "Operator actions"),
-    actions(t, snap),
+    next.text,
+    el("h3", {}, "Your decision"),
+    actions(t, snap, next.primary),
     el("h3", {}, "History"),
     history(t)].filter(Boolean));
 }
@@ -326,55 +332,89 @@ function scale(p) {
     timed("sentence", s, "p"));
 }
 
+// Each action keeps one name: the button, the confirmation and the history all say the same thing.
+const DONE = { submit: "Submitted for assignment.", assign: "Assigned by hand. Waiting for them to accept.", route_again: "Routing again.",
+  cancel_routing: "Routing cancelled.", close: "Task closed." };
 async function command(t, type, extra) {
-  const ok = await post(`/api/tasks/${t.id}/commands`, { type, expected_version: t.version, ...extra }, `${label("command", type)}: done.`);
+  const ok = await post(`/api/tasks/${t.id}/commands`, { type, expected_version: t.version, ...extra }, DONE[type]);
   if (ok) clearDrafts(`t${t.id}-`);
 }
 
-function reasonSelect(key, snap) {
-  return el("label", { class: "f" }, "Reason",
-    field("select", key, { name: "reason", required: true },
-      el("option", { value: "" }, "Choose a reason"),
-      ...snap.reason_codes.map((r) => el("option", { value: r.code }, LABELS.reason[r.code] || r.label || r.code))));
+// What the operator can do now, in one sentence, and which button (if any) is the likely one. A
+// request still waiting gets no likely button: unknown is not failed, so waiting stays a fair choice.
+function nextStep(t) {
+  const step = (text, primary = null) => ({ text: el("p", { class: "next" }, text), primary });
+  const who = (t.active_assignment && names.get(t.active_assignment.contributor_id)) || "The contributor";
+  if (t.state === "unassigned") return step("Not sent to the engine yet. Submit it when it is ready, or assign someone by hand.", "submit");
+  if (t.state === "routing" && t.pending_request) {
+    const node = timed("advice", t.pending_request.started_at_ms, "p");
+    node.classList.add("next");
+    return { text: node, primary: null };
+  }
+  if (t.state === "offered") return step(`Waiting for ${who} to accept. Nothing to do yet.`);
+  if (t.state === "assigned") return step(`${who} has accepted. Routing is complete.`);
+  if (t.state === "closed") return step("Closed. Nothing more can happen to this task.");
+  if (t.state !== "needs_attention") return step("Nothing to do yet.");
+  if (t.attention_reason === "no_match") return step("The engine found nobody. Assign someone by hand, or close the task.", "assign");
+  if (t.attention_reason === "selection_unavailable") return step("The engine's pick filled up first. Route again, or assign someone by hand.", "route_again");
+  if (t.attention_reason === "declined") return step("The contributor declined. Route again without them, or assign someone by hand.", "route_again");
+  return step("The offer could not be delivered. Route again without them, or assign someone by hand.", "route_again");
 }
 
-function actionForm(t, cmd, title, controls, collect) {
-  return el("form", { class: "act", onsubmit: (e) => { e.preventDefault(); command(t, cmd, collect(e.target.elements)); } },
-    el("fieldset", {}, el("legend", {}, title), ...controls,
-      el("button", { type: "submit", "data-key": `t${t.id}-${cmd}-go` }, label("command", cmd))));
-}
-
-function actions(t, snap) {
+// One form for the whole decision: one reason, shared by every action that needs one.
+function actions(t, snap, primary) {
   const k = `t${t.id}`;
-  const forms = COMMAND_ORDER.filter((c) => t.allowed_commands.includes(c)).map((cmd) => {
-    const reason = needsReason(cmd, t) ? [reasonSelect(`${k}-${cmd}-reason`, snap)] : [];
-    const reasonOf = (f) => (needsReason(cmd, t) ? { reason_code: f.namedItem("reason").value } : {});
-    if (cmd === "assign") {
-      const ids = t.assignable_contributor_ids;
-      const title = t.active_assignment ? "Reassign by hand" : "Assign by hand";
-      if (!ids.length) return el("div", { class: "act" }, el("h4", {}, title), el("p", { class: "muted" }, "No eligible contributor has room."));
-      const people = new Map(snap.contributors.map((c) => [c.id, c]));
-      const opt = (id) => { const c = people.get(id); return el("option", { value: id }, c ? `${c.name} (${c.active_load} of ${c.capacity})` : `Contributor ${id}`); };
-      return actionForm(t, cmd, title, [
+  const allowed = COMMAND_ORDER.filter((c) => t.allowed_commands.includes(c));
+  if (!allowed.length) return el("p", { class: "muted" }, "No actions in this state.");
+  const button = (cmd, text) => el("button", { type: "submit", name: "cmd", value: cmd, "data-key": `${k}-${cmd}-go`,
+    class: cmd === primary ? "primary" : null }, text || label("command", cmd));
+  const parts = [];
+  const reasoned = allowed.filter((c) => c !== "close" && needsReason(c, t));
+  if (reasoned.length) {
+    const verbs = reasoned.map((c) => label("command", c).replace(/ by hand$/, "").toLowerCase());
+    const list = verbs.length > 1 ? `${verbs.slice(0, -1).join(", ")} or ${verbs.at(-1)}` : verbs[0];
+    parts.push(el("label", { class: "f" }, `Reason for stepping in (needed to ${list})`,
+      field("select", `${k}-reason`, { name: "reason" }, el("option", { value: "" }, "Choose a reason"),
+        ...snap.reason_codes.map((r) => el("option", { value: r.code }, LABELS.reason[r.code] || r.label || r.code)))));
+  }
+  if (allowed.includes("assign")) {
+    const ids = t.assignable_contributor_ids;
+    const people = new Map(snap.contributors.map((c) => [c.id, c]));
+    const opt = (id) => { const c = people.get(id); return el("option", { value: id }, c ? `${c.name} (${c.active_load} of ${c.capacity} tasks)` : `Contributor ${id}`); };
+    parts.push(ids.length
+      ? el("div", { class: "line" },
         el("label", { class: "f" }, "Contributor", field("select", `${k}-assign-who`, { name: "contributor" }, ...ids.map(opt))),
-        ...reason,
         el("label", { class: "f" }, "Note (optional)", field("input", `${k}-assign-note`, { name: "note", maxlength: "500", autocomplete: "off" })),
-      ], (f) => ({ contributor_id: Number(f.namedItem("contributor").value), ...reasonOf(f), note: f.namedItem("note").value.trim() || undefined }));
+        button("assign", t.active_assignment ? "Reassign by hand" : "Assign by hand"))
+      : el("p", { class: "muted" }, "Nobody who works in this area has room, so nobody can be assigned by hand."));
+  }
+  const rest = allowed.filter((c) => c !== "assign" && c !== "close");
+  if (rest.includes("route_again") && t.state === "needs_attention") {
+    const lost = t.attention_reason === "declined" || t.attention_reason === "offer_failed";
+    parts.push(el("label", { class: "check" }, field("input", `${k}-route-exclude`, { type: "checkbox", name: "exclude", checked: lost }),
+      " When routing again, leave out anyone who declined or could not be reached"));
+  }
+  if (rest.length) parts.push(el("div", { class: "buttons" }, ...rest.map((c) => button(c))));
+  const form = el("form", { class: "decide", onsubmit: (e) => {
+    e.preventDefault();
+    const cmd = e.submitter && e.submitter.value;
+    const f = e.target.elements;
+    if (!cmd) return;
+    const extra = {};
+    if (needsReason(cmd, t)) {
+      extra.reason_code = f.namedItem("reason").value;
+      if (!extra.reason_code) { say(`Choose a reason first: "${label("command", cmd)}" needs one.`, "error"); focusKey(`${k}-reason`); return; }
     }
-    if (cmd === "route_again" && t.state === "needs_attention") {
-      const lost = t.attention_reason === "declined" || t.attention_reason === "offer_failed";
-      return actionForm(t, cmd, "Route again", [el("label", { class: "check" },
-        field("input", `${k}-route-exclude`, { type: "checkbox", name: "exclude", checked: lost }),
-        " Leave out contributors who declined or could not be reached")],
-      (f) => ({ exclude_previous: f.namedItem("exclude").checked }));
+    if (cmd === "assign") {
+      extra.contributor_id = Number(f.namedItem("contributor").value);
+      extra.note = f.namedItem("note").value.trim() || undefined;
     }
-    if (cmd === "close") {
-      return el("div", { class: "act" }, confirmBlock(`${k}-close`, "Close task", "Close this task? A closed task cannot be reopened.",
-        "Yes, close it", () => command(t, "close", {})));
-    }
-    return actionForm(t, cmd, label("command", cmd), reason, reasonOf);
-  });
-  return forms.length ? el("div", { class: "stack" }, ...forms) : el("p", { class: "muted" }, "No operator actions in this state.");
+    if (cmd === "route_again" && t.state === "needs_attention") extra.exclude_previous = f.namedItem("exclude").checked;
+    command(t, cmd, extra);
+  } }, ...parts);
+  const close = allowed.includes("close") && confirmBlock(`${k}-close`, "Close task",
+    "Close this task? A closed task cannot be reopened.", "Yes, close it", () => command(t, "close", {}));
+  return el("div", { class: "stack" }, parts.length ? form : null, close || null);
 }
 
 function history(t) {

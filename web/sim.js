@@ -47,7 +47,7 @@
         el("div", { class: "buttons" },
           el("button", { type: "button", "data-key": `sim-${a.id}-accept`, onclick: reply(a, "accept") }, "Accept"),
           el("button", { type: "button", "data-key": `sim-${a.id}-decline`, onclick: reply(a, "decline") }, "Decline"),
-          el("button", { type: "button", "data-key": `sim-${a.id}-fail`, onclick: reply(a, "fail") }, "Offer fails")));
+          el("button", { type: "button", "data-key": `sim-${a.id}-fail`, onclick: reply(a, "fail") }, "Not delivered")));
     })));
   }
 
@@ -80,5 +80,12 @@
     if (next === sig) return;
     sig = next;
     document.getElementById("sim-body").replaceChildren(scenarioBlock(t, snap), offersBlock(snap), resetBlock(snap));
+  });
+
+  // The panel can be folded away; remember that per browser. Storage may be blocked, which is fine.
+  const panel = document.getElementById("sim");
+  try { if (localStorage.getItem("sim-open") === "0") panel.open = false; } catch (_) { /* default stays open */ }
+  panel.addEventListener("toggle", () => {
+    try { localStorage.setItem("sim-open", panel.open ? "1" : "0"); } catch (_) { /* not remembered */ }
   });
 })();
