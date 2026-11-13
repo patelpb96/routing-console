@@ -44,6 +44,7 @@ pub fn router(app: Arc<App>) -> Router {
         )
         .route("/api/snapshot", get(snapshot))
         .route("/api/events", get(events))
+        .route("/api/overrides.jsonl", get(overrides))
         .route("/api/tasks", post(create_task))
         .route("/api/tasks/{id}/commands", post(command))
         .route("/api/sim/assignments/{id}/reply", post(reply))
@@ -58,6 +59,20 @@ async fn page(content_type: &'static str, body: &'static str) -> Response {
 
 async fn snapshot(State(app): Shared) -> Result<Response, AppError> {
     Ok(Json(app.snapshot()?).into_response())
+}
+
+async fn overrides(State(app): Shared) -> Result<Response, AppError> {
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"overrides.jsonl\"",
+            ),
+        ],
+        app.overrides_jsonl()?,
+    )
+        .into_response())
 }
 
 async fn events(State(app): Shared) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {

@@ -336,6 +336,12 @@ impl App {
         self.store.transaction(|tx| Ok(snapshot::build(tx, input)?))
     }
 
+    /// `GET /api/overrides.jsonl`, read in one transaction.
+    pub fn overrides_jsonl(&self) -> Result<String, AppError> {
+        self.store
+            .transaction(|tx| Ok(crate::overrides::jsonl(tx)?))
+    }
+
     fn finish(&self, task_id: i64, step: Step) -> Result<TaskView, AppError> {
         match step {
             Step::Stale => Err(AppError::Stale(Box::new(self.task(task_id)?))),
