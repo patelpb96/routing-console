@@ -1,4 +1,4 @@
-Repository: <link>
+Repository: https://github.com/patelpb96/routing-console
 Walkthrough video: <Loom link, 10 minutes max>
 
 Agent setup:
