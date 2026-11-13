@@ -75,6 +75,7 @@ impl App {
                 + 1;
             meta_set(tx, "boot_count", &count.to_string())?;
             meta_set(tx, "boot_started_at_ms", &now.to_string())?;
+            note_restart(tx, count, now)?;
             Ok((
                 seed,
                 Boot {
@@ -198,7 +199,19 @@ impl App {
         self.finish(task_id, step)
     }
 
+    /// Applies one engine report and acknowledges it, so the engine stops re-sending it. A
+    /// refused report (a repeat after a restart, say) is acknowledged too: sending it again
+    /// would be refused again. Only an internal error leaves it for the next start.
     pub fn apply_engine_result(&self, report: EngineReport) -> Result<TaskView, AppError> {
+        let outcome = self.engine_result(report);
+        match &outcome {
+            Err(AppError::Internal(_)) => {}
+            _ => self.engine.acknowledge(report.request_id)?,
+        }
+        outcome
+    }
+
+    fn engine_result(&self, report: EngineReport) -> Result<TaskView, AppError> {
         let now = self.clock.now_ms();
         let (task_id, step) = self.store.transaction(|tx| {
             let (task_id, request) = read::request(tx, report.request_id)?.ok_or_else(|| {
@@ -233,7 +246,14 @@ impl App {
         let now = self.clock.now_ms();
         self.store.transaction(|tx| {
             let facts = load(tx, task_id)?;
-            Ok(snapshot::task_view(tx, facts, scenario, now)?)
+            let contributors = read::contributors(tx)?;
+            Ok(snapshot::task_view(
+                tx,
+                facts,
+                scenario,
+                &contributors,
+                now,
+            )?)
         })
     }
 
@@ -276,6 +296,20 @@ fn refused(r: Refusal) -> AppError {
 fn load(conn: &Connection, task_id: i64) -> Result<TaskFacts, AppError> {
     read::load_facts(conn, task_id)?
         .ok_or_else(|| AppError::NotFound(format!("No task with id {task_id}.")))
+}
+
+/// Contract: on start, one `server_restarted` event on every task still waiting on the engine.
+/// The request itself stays open; nothing else is rebuilt.
+fn note_restart(conn: &Connection, boot: i64, now: i64) -> Result<(), AppError> {
+    for facts in read::all_facts(conn)? {
+        if facts.pending.is_none() {
+            continue;
+        }
+        let decision =
+            domain::decide(&facts, &Command::ServerRestarted { boot }).map_err(refused)?;
+        write::apply(conn, &facts, &decision, now)?;
+    }
+    Ok(())
 }
 
 fn assignee(conn: &Connection, id: Option<i64>) -> Result<ContributorFacts, AppError> {

@@ -64,6 +64,8 @@ pub struct TaskView {
     pub active_assignment: Option<AssignmentView>,
     pub scenario: Scenario,
     pub allowed_commands: Vec<OperatorKind>,
+    /// Who `assign` would accept right now, from `domain::assignable_contributors`.
+    pub assignable_contributor_ids: Vec<i64>,
     pub events: Vec<EventView>,
 }
 
@@ -111,8 +113,10 @@ pub fn task_view(
     conn: &rusqlite::Connection,
     facts: TaskFacts,
     scenario: Scenario,
+    contributors: &[ContributorFacts],
     now_ms: i64,
 ) -> rusqlite::Result<TaskView> {
+    let assignable_contributor_ids = assignable_contributors(&facts, contributors);
     let TaskFacts {
         task,
         pending,
@@ -124,6 +128,7 @@ pub fn task_view(
         .collect();
     Ok(TaskView {
         allowed_commands: allowed_commands(&task),
+        assignable_contributor_ids,
         pending_request: pending.map(|p| {
             let elapsed_ms = now_ms - p.started_at_ms;
             PendingView {
@@ -162,6 +167,7 @@ pub struct SnapshotInput {
 }
 
 pub fn build(conn: &rusqlite::Connection, input: SnapshotInput) -> rusqlite::Result<Snapshot> {
+    let contributors = crate::store::read::contributors(conn)?;
     let tasks = crate::store::read::all_facts(conn)?
         .into_iter()
         .map(|f| {
@@ -170,7 +176,7 @@ pub fn build(conn: &rusqlite::Connection, input: SnapshotInput) -> rusqlite::Res
                 .get(&f.task.id)
                 .copied()
                 .unwrap_or(Scenario::Auto);
-            task_view(conn, f, s, input.now_ms)
+            task_view(conn, f, s, &contributors, input.now_ms)
         })
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(Snapshot {
@@ -192,7 +198,7 @@ pub fn build(conn: &rusqlite::Connection, input: SnapshotInput) -> rusqlite::Res
                 label: code.label(),
             })
             .collect(),
-        contributors: crate::store::read::contributors(conn)?,
+        contributors,
         tasks,
     })
 }

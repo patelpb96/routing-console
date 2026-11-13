@@ -56,15 +56,28 @@ pub fn apply(
                 applied.opened_request = Some(conn.last_insert_rowid());
             }
             Change::ResolveRequest { request_id, result } => {
-                let (kind, who) = match result {
-                    EngineResult::Match(c) => (ResultKind::Match, Some(*c)),
-                    EngineResult::NoMatch => (ResultKind::NoMatch, None),
-                };
+                let (kind, who) = result_columns(*result);
                 conn.execute(
                     "UPDATE routing_requests SET status = 'resolved', ended_at_ms = ?2,
                          result_kind = ?3, result_contributor_id = ?4, returned_at_ms = ?2
                      WHERE id = ?1",
-                    params![request_id, now, kind.as_str(), who],
+                    params![request_id, now, kind, who],
+                )?;
+            }
+            Change::SupersedeRequest { request_id } => {
+                conn.execute(
+                    "UPDATE routing_requests SET status = 'superseded', ended_at_ms = ?2
+                     WHERE id = ?1",
+                    params![request_id, now],
+                )?;
+            }
+            Change::RecordLateResult { request_id, result } => {
+                let (kind, who) = result_columns(*result);
+                conn.execute(
+                    "UPDATE routing_requests SET result_kind = ?2, result_contributor_id = ?3,
+                         returned_at_ms = ?4
+                     WHERE id = ?1",
+                    params![request_id, kind, who, now],
                 )?;
             }
             Change::OfferAssignment {
@@ -113,6 +126,13 @@ pub fn apply(
         insert_event(conn, task_id, e, &with_new_ids(&e.data, applied), now)?;
     }
     Ok(applied)
+}
+
+fn result_columns(result: EngineResult) -> (&'static str, Option<i64>) {
+    match result {
+        EngineResult::Match(c) => (ResultKind::Match.as_str(), Some(c)),
+        EngineResult::NoMatch => (ResultKind::NoMatch.as_str(), None),
+    }
 }
 
 /// `decide` cannot know ids SQLite assigns, so the store adds them to the event's data.

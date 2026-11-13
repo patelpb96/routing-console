@@ -68,13 +68,23 @@ function render(snap) {
 
     let state = t.state;
     if (a) state += ` (${names.get(a.contributor_id) || a.contributor_id})`;
+    const p = t.pending_request;
+    if (p) {
+      state += `, ${since(p.elapsed_ms)} waiting`;
+      if (p.past_normal_window) state += ", past normal window";
+    }
     return el("tr", {},
       el("td", {}, t.title), el("td", {}, t.area), el("td", {}, t.priority),
       el("td", {}, state), el("td", {}, since(snap.now_ms - t.created_at_ms)),
       actions, sim);
   });
   $("#tasks").replaceChildren(...rows);
+  waiting = snap.tasks.some((t) => t.pending_request);
 }
+
+// Elapsed time is worked out by the server; while anything waits, ask for it once a second.
+let waiting = false;
+setInterval(() => { if (waiting) refresh(); }, 1000);
 
 async function refresh() {
   try {

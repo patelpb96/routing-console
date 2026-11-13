@@ -1,0 +1,268 @@
+//! One builder per row of the transition table. `decide` picks the row; these say what it
+//! writes. Each event summary is a finished sentence for the timeline.
+
+use serde_json::json;
+
+use super::*;
+
+fn event(kind: EventKind, actor: Actor, summary: String, data: serde_json::Value) -> EventDraft {
+    EventDraft {
+        kind,
+        actor,
+        summary,
+        data,
+    }
+}
+
+fn moves_to(state: TaskState, changes: Vec<Change>, e: EventDraft) -> Decision {
+    Decision {
+        state,
+        attention_reason: None,
+        bump_version: true,
+        changes,
+        events: vec![e],
+    }
+}
+
+/// A decision that adds records and an event but leaves the task row (state, version) as is.
+fn note_only(task: &Task, changes: Vec<Change>, e: EventDraft) -> Decision {
+    Decision {
+        state: task.state,
+        attention_reason: task.attention_reason,
+        bump_version: false,
+        changes,
+        events: vec![e],
+    }
+}
+
+fn needs_attention(reason: AttentionReason, changes: Vec<Change>, e: EventDraft) -> Decision {
+    Decision {
+        attention_reason: Some(reason),
+        ..moves_to(TaskState::NeedsAttention, changes, e)
+    }
+}
+
+pub fn submit(note: &Option<String>) -> Decision {
+    moves_to(
+        TaskState::Routing,
+        vec![Change::OpenRequest { excluded: vec![] }],
+        event(
+            EventKind::RoutingStarted,
+            Actor::Operator,
+            "Submitted for routing; the engine is looking for a contributor.".into(),
+            json!({"excluded": [], "note": note}),
+        ),
+    )
+}
+
+/// Routing to routing: neither the state nor the active assignment changes, so by contract
+/// section 2 the version stays where it is.
+pub fn route_again(old: &PendingRequest, code: ReasonCode, note: &Option<String>) -> Decision {
+    Decision {
+        state: TaskState::Routing,
+        attention_reason: None,
+        bump_version: false,
+        changes: vec![
+            Change::SupersedeRequest { request_id: old.id },
+            Change::OpenRequest { excluded: vec![] },
+        ],
+        events: vec![event(
+            EventKind::OperatorRerouted,
+            Actor::Operator,
+            format!(
+                "Routed again ({}); the earlier engine request is set aside.",
+                code.label()
+            ),
+            json!({"superseded_request_id": old.id, "reason_code": code, "excluded": [],
+                   "note": note}),
+        )],
+    }
+}
+
+pub fn cancel_routing(old: &PendingRequest, code: ReasonCode, note: &Option<String>) -> Decision {
+    moves_to(
+        TaskState::Unassigned,
+        vec![Change::SupersedeRequest { request_id: old.id }],
+        event(
+            EventKind::OperatorCancelledRouting,
+            Actor::Operator,
+            format!(
+                "Routing cancelled ({}); the task is back to unassigned.",
+                code.label()
+            ),
+            json!({"superseded_request_id": old.id, "reason_code": code, "note": note}),
+        ),
+    )
+}
+
+pub fn operator_assign(
+    old: &PendingRequest,
+    c: &ContributorFacts,
+    code: ReasonCode,
+    note: &Option<String>,
+) -> Decision {
+    moves_to(
+        TaskState::Offered,
+        vec![
+            Change::SupersedeRequest { request_id: old.id },
+            Change::OfferAssignment {
+                contributor_id: c.id,
+                source: Source::Operator,
+                reason_code: Some(code),
+                request_id: None,
+            },
+        ],
+        event(
+            EventKind::OperatorAssigned,
+            Actor::Operator,
+            format!(
+                "Assigned by hand to {} ({}); the pending engine request is set aside.",
+                c.name,
+                code.label()
+            ),
+            json!({"superseded_request_id": old.id, "contributor_id": c.id,
+                   "contributor_name": c.name, "reason_code": code, "note": note}),
+        ),
+    )
+}
+
+pub fn engine_matched(request_id: i64, c: &ContributorFacts) -> Decision {
+    moves_to(
+        TaskState::Offered,
+        vec![
+            Change::ResolveRequest {
+                request_id,
+                result: EngineResult::Match(c.id),
+            },
+            Change::OfferAssignment {
+                contributor_id: c.id,
+                source: Source::Engine,
+                reason_code: None,
+                request_id: Some(request_id),
+            },
+        ],
+        event(
+            EventKind::EngineMatched,
+            Actor::Engine,
+            format!(
+                "The engine matched {}; the task is offered to them.",
+                c.name
+            ),
+            json!({"request_id": request_id, "contributor_id": c.id}),
+        ),
+    )
+}
+
+pub fn selection_unavailable(task: &Task, request_id: i64, c: &ContributorFacts) -> Decision {
+    let why = if c.has_area(task.area) {
+        format!("has no room ({} of {} active)", c.active_load, c.capacity)
+    } else {
+        format!("does not cover {}", task.area)
+    };
+    needs_attention(
+        AttentionReason::SelectionUnavailable,
+        vec![Change::ResolveRequest {
+            request_id,
+            result: EngineResult::Match(c.id),
+        }],
+        event(
+            EventKind::EngineSelectionUnavailable,
+            Actor::Engine,
+            format!("The engine picked {}, who {why}. Needs attention.", c.name),
+            json!({"request_id": request_id, "contributor_id": c.id}),
+        ),
+    )
+}
+
+pub fn no_match(request_id: i64) -> Decision {
+    needs_attention(
+        AttentionReason::NoMatch,
+        vec![Change::ResolveRequest {
+            request_id,
+            result: EngineResult::NoMatch,
+        }],
+        event(
+            EventKind::EngineNoMatch,
+            Actor::Engine,
+            "The engine found no eligible contributor. Needs attention.".into(),
+            json!({"request_id": request_id}),
+        ),
+    )
+}
+
+/// A result for a request the operator already replaced: stored on its row, told in one
+/// event, and nothing else, so a late answer can never undo what the operator did.
+pub fn late_result(
+    task: &Task,
+    request: &ReturnedRequest,
+    result: EngineResult,
+    contributor: Option<&ContributorFacts>,
+) -> Decision {
+    let suggested = match (result, contributor) {
+        (EngineResult::Match(_), Some(c)) => c.name.clone(),
+        (EngineResult::Match(id), None) => format!("contributor {id}"),
+        (EngineResult::NoMatch, _) => "no match".into(),
+    };
+    let instead = match &request.superseded_by {
+        Some(Supersession::Assigned { contributor_name }) => {
+            format!("you had already replaced by assigning {contributor_name}")
+        }
+        Some(Supersession::Rerouted) => "you had already replaced by routing again".into(),
+        Some(Supersession::Cancelled) => "you had already cancelled".into(),
+        None => "that had already been set aside".into(),
+    };
+    let contributor_id = match result {
+        EngineResult::Match(id) => Some(id),
+        EngineResult::NoMatch => None,
+    };
+    note_only(
+        task,
+        vec![Change::RecordLateResult {
+            request_id: request.id,
+            result,
+        }],
+        event(
+            EventKind::LateResultIgnored,
+            Actor::Engine,
+            format!(
+                "The engine returned {suggested} for a request {instead}. Recorded, not applied."
+            ),
+            json!({"request_id": request.id, "contributor_id": contributor_id}),
+        ),
+    )
+}
+
+pub fn server_restarted(task: &Task, pending: &PendingRequest, boot: i64) -> Decision {
+    note_only(
+        task,
+        vec![],
+        event(
+            EventKind::ServerRestarted,
+            Actor::System,
+            format!(
+                "The server restarted while request {} was pending. It stays open; the engine \
+                 may still answer.",
+                pending.id
+            ),
+            json!({"request_id": pending.id, "boot": boot}),
+        ),
+    )
+}
+
+pub fn accept(a: &ActiveAssignment) -> Decision {
+    moves_to(
+        TaskState::Assigned,
+        vec![Change::AcceptAssignment {
+            assignment_id: a.id,
+        }],
+        event(
+            EventKind::ContributorAccepted,
+            Actor::Contributor,
+            format!(
+                "{} accepted the offer. Routing is complete.",
+                a.contributor_name
+            ),
+            json!({"assignment_id": a.id, "contributor_id": a.contributor_id}),
+        ),
+    )
+}

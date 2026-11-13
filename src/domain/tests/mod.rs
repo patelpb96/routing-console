@@ -65,13 +65,58 @@ fn op(op: OperatorOp, expected_version: i64) -> Command {
     }
 }
 
+fn request(status: RequestStatus, superseded_by: Option<Supersession>) -> ReturnedRequest {
+    ReturnedRequest {
+        id: 7,
+        status,
+        has_result: false,
+        superseded_by,
+    }
+}
+
 fn returned(status: RequestStatus, c: ContributorFacts) -> Command {
     Command::EngineReturned {
-        request: ReturnedRequest { id: 7, status },
+        request: request(status, None),
         result: EngineResult::Match(c.id),
         contributor: Some(c),
     }
 }
+
+fn grace() -> ContributorFacts {
+    ContributorFacts {
+        id: 7,
+        name: "Grace Lin".into(),
+        areas: vec![Area::Finance],
+        capacity: 1,
+        active_load: 0,
+    }
+}
+
+fn route_again(code: Option<ReasonCode>, exclude_previous: bool, v: i64) -> Command {
+    op(
+        OperatorOp::RouteAgain {
+            reason_code: code,
+            exclude_previous,
+        },
+        v,
+    )
+}
+
+fn cancel(code: Option<ReasonCode>) -> Command {
+    op(OperatorOp::CancelRouting { reason_code: code }, 3)
+}
+
+fn assign(c: ContributorFacts, code: Option<ReasonCode>) -> Command {
+    op(
+        OperatorOp::Assign {
+            contributor: c,
+            reason_code: code,
+        },
+        3,
+    )
+}
+
+const SLOW: Option<ReasonCode> = Some(ReasonCode::EngineTooSlow);
 
 fn refused(r: Result<Decision, Refusal>) -> String {
     match r {
@@ -160,21 +205,7 @@ fn accept_of_an_assignment_that_is_not_the_active_offer_is_refused() {
     assert!(m.contains("99"), "{m}");
 }
 
-#[test]
-fn a_match_for_a_full_contributor_is_refused_until_its_row_exists() {
-    refused(decide(
-        &routing_facts(),
-        &returned(RequestStatus::Pending, contributor(2, 2)),
-    ));
-}
-
-#[test]
-fn a_result_for_another_request_is_refused_until_its_row_exists() {
-    refused(decide(
-        &routing_facts(),
-        &returned(RequestStatus::Superseded, contributor(0, 2)),
-    ));
-}
+mod unresolved;
 
 #[test]
 fn close_is_refused_on_a_closed_task() {
@@ -187,7 +218,22 @@ fn allowed_commands_follow_the_rows_written() {
         allowed_commands(&task(TaskState::Unassigned, 1)),
         vec![OperatorKind::Submit]
     );
-    assert!(allowed_commands(&task(TaskState::Closed, 1)).is_empty());
+    assert_eq!(
+        allowed_commands(&task(TaskState::Routing, 1)),
+        vec![
+            OperatorKind::RouteAgain,
+            OperatorKind::CancelRouting,
+            OperatorKind::Assign
+        ]
+    );
+    for s in [
+        TaskState::Offered,
+        TaskState::Assigned,
+        TaskState::NeedsAttention,
+        TaskState::Closed,
+    ] {
+        assert!(allowed_commands(&task(s, 1)).is_empty());
+    }
 }
 
 #[test]

@@ -54,9 +54,11 @@ operator overrides the engine's choice among eligible people, not the limits.
 
 Every operator command carries `expected_version`. If it differs from the stored version the
 command is refused as stale and the reply carries the current task. The version goes up by one
-each time a command changes the task's state or its active assignment. Events that only add
-information (`late_result_ignored`, `server_restarted`) do not change the version, so a note
-arriving cannot make an operator's next action stale.
+each time a command changes what the operator is looking at: the task's state, its active
+assignment, or its pending request (so `route_again` from routing counts: the elapsed clock the
+other tab was judging has restarted). Events that only add information (`late_result_ignored`,
+`server_restarted`) do not change the version, so a note arriving cannot make an operator's next
+action stale.
 
 One command is one SQLite transaction: the check, the record changes and the events are written
 together or not at all.
@@ -99,8 +101,8 @@ On start-up the app writes one `server_restarted` event on every task that has a
    other state does.
 4. No contributor's active load (offered plus accepted) exceeds their capacity.
 5. An active assignee has the task's area.
-6. A task's version never goes down, and it changes if and only if the state or the active
-   assignment changed.
+6. A task's version never goes down, and it changes if and only if the state, the active
+   assignment or the pending request changed.
 7. A result for a superseded request changes nothing except its own request row and one event.
 8. Events are append only, ordered by time, and the first event of every task is `task_created`.
 9. `closed` is final: nothing moves a task out of it.
@@ -137,9 +139,10 @@ Snapshot:
       "state": "routing", "version": 2, "attention_reason": null,
       "created_at_ms": 0, "updated_at_ms": 0,
       "pending_request": {"id": 7, "started_at_ms": 0, "elapsed_ms": 26000, "past_normal_window": true},
-      "active_assignment": {"id": 4, "contributor_id": 2, "status": "offered", "source": "engine", "reason_code": null},
+      "active_assignment": null,
       "scenario": "auto",
       "allowed_commands": ["route_again", "cancel_routing", "assign"],
+      "assignable_contributor_ids": [2, 5],
       "events": [
         {"id": 1, "at_ms": 0, "kind": "task_created", "actor": "operator", "summary": "", "data": {}}
       ]
@@ -148,8 +151,22 @@ Snapshot:
 }
 ```
 
-`pending_request` and `active_assignment` are null when absent. `allowed_commands` comes from
-`domain.rs`, so the page never carries its own copy of the transition table. Event kinds:
+`pending_request` and `active_assignment` are null when absent. When present, an assignment is
+`{"id": 4, "contributor_id": 2, "status": "offered", "source": "engine", "reason_code": null}`.
+`allowed_commands` comes from `domain`, so the page never carries its own copy of the transition
+table. `assignable_contributor_ids` comes from the same `domain` function that validates the
+`assign` command (has the area, has room, is not the current holder), so the page never carries
+its own copy of the capacity rules either. It is advice for drawing the picker: another task can
+use up a contributor's room without changing this task's version, so the server still checks
+inside the command's transaction and the page fetches the snapshot again after a refusal.
+
+`elapsed_ms` and `past_normal_window` are starting values, true at `now_ms`. Crossing 20 seconds
+commits nothing, so no `changed` event fires: the page ticks once a second from `now_ms` (kept as
+an offset against its own monotonic clock) and each request's `started_at_ms`, and flips "past
+normal window" itself when the elapsed time is strictly greater than `normal_window_ms.max`.
+
+Every route that changes data, the simulation routes included, is followed by a `changed` event,
+so the page can ignore reply bodies and always redraw from the snapshot. Event kinds:
 `task_created`, `routing_started`, `engine_matched`, `engine_no_match`,
 `engine_selection_unavailable`, `operator_assigned`, `operator_rerouted`,
 `operator_cancelled_routing`, `late_result_ignored`, `contributor_accepted`,

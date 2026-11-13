@@ -61,6 +61,7 @@ const TASK_FIELDS: &[&str] = &[
     "active_assignment",
     "scenario",
     "allowed_commands",
+    "assignable_contributor_ids",
     "events",
 ];
 

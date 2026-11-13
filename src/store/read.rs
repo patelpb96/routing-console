@@ -181,20 +181,58 @@ pub fn request(
     conn: &Connection,
     request_id: i64,
 ) -> rusqlite::Result<Option<(i64, ReturnedRequest)>> {
-    conn.query_row(
-        "SELECT task_id, id, status FROM routing_requests WHERE id = ?1",
-        [request_id],
-        |r| {
-            Ok((
-                r.get(0)?,
-                ReturnedRequest {
-                    id: r.get(1)?,
-                    status: word(r, 2, RequestStatus::parse)?,
-                },
-            ))
+    let row = conn
+        .query_row(
+            "SELECT task_id, id, status, returned_at_ms IS NOT NULL FROM routing_requests
+             WHERE id = ?1",
+            [request_id],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    word(r, 2, RequestStatus::parse)?,
+                    r.get::<_, bool>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((task_id, id, status, has_result)) = row else {
+        return Ok(None);
+    };
+    let superseded_by = match status {
+        RequestStatus::Superseded => superseded_by(conn, id)?,
+        _ => None,
+    };
+    Ok(Some((
+        task_id,
+        ReturnedRequest {
+            id,
+            status,
+            has_result,
+            superseded_by,
         },
-    )
-    .optional()
+    )))
+}
+
+/// The operator event that set a request aside, found by the id it recorded.
+fn superseded_by(conn: &Connection, request_id: i64) -> rusqlite::Result<Option<Supersession>> {
+    let row: Option<(String, Option<String>)> = conn
+        .query_row(
+            "SELECT kind, json_extract(data, '$.contributor_name') FROM events
+             WHERE json_extract(data, '$.superseded_request_id') = ?1
+             ORDER BY id LIMIT 1",
+            [request_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(row.and_then(|(kind, name)| match EventKind::parse(&kind)? {
+        EventKind::OperatorRerouted => Some(Supersession::Rerouted),
+        EventKind::OperatorCancelledRouting => Some(Supersession::Cancelled),
+        EventKind::OperatorAssigned => Some(Supersession::Assigned {
+            contributor_name: name.unwrap_or_else(|| "another contributor".into()),
+        }),
+        _ => None,
+    }))
 }
 
 pub fn events(conn: &Connection, task_id: i64) -> rusqlite::Result<Vec<EventRow>> {
