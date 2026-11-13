@@ -1,0 +1,6 @@
+rule: personal-info
+why: RULES.md rule 9 excludes email addresses whose local part is noreply or no-reply, and with no other hit the result is PASS.
+expect: pass
+file: submission/notices.md
+| Build notices are sent from noreply@example.com.
+| Automated replies come from no-reply@example.com and are not read.

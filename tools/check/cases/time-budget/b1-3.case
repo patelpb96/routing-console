@@ -1,0 +1,11 @@
+rule: time-budget
+why: Only the Min cell counts; n/a and not measured add nothing and the Min column sums 120+100+40 = 260, under 270, so PASS. The # column (1 to 5, total 15) must not be added, or the sum would be 275.
+expect: pass
+file: ledger.md
+| | # | Card | Min |
+| |---|---|---|
+| | 1 | intake | 120 |
+| | 2 | routing | n/a |
+| | 3 | seed data | 100 |
+| | 4 | UI | not measured |
+| | 5 | docs | 40 |

@@ -1,0 +1,3 @@
+rule: file-count
+why: RULES.md rule 1 says 0 to 10 entries is PASS; an empty submission directory has 0 entries, which is within the limit.
+expect: pass

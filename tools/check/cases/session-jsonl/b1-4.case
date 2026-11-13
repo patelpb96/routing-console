@@ -1,0 +1,7 @@
+rule: session-jsonl
+why: RULES rule 5 fails when no file ends in .jsonl, and the brief asks to "include their native exports"; export.json and notes.txt do not end in .jsonl.
+expect: fail
+file: submission/notes.txt
+| Session exports go here later.
+file: submission/export.json
+| {"speaker":"operator","text":"Not a jsonl file."}

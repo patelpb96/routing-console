@@ -1,0 +1,6 @@
+rule: file-size
+why: RULES.md rule 2 measures bytes, not characters ("must be at most `--max-bytes` bytes"); this text file is 101 bytes (90 characters plus the LF, ten of them 2-byte UTF-8 letters) against a limit of 100, so FAIL.
+expect: fail
+max-bytes: 100
+file: submission/notes.txt
+| abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijéééééééééé

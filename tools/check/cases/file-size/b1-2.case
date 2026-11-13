@@ -1,0 +1,5 @@
+rule: file-size
+why: RULES.md rule 2 says one byte more than --max-bytes is FAIL ("one byte more is `FAIL`"), here 1001 bytes against a 1000-byte limit.
+expect: fail
+max-bytes: 1000
+bytes: submission/one-over.bin 1001

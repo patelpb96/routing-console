@@ -1,0 +1,5 @@
+rule: build-output
+why: RULES.md rule 3 fails only when a path component is exactly node_modules, target, dist or build, or a file ends in a listed database extension; this clean src folder has none, so it is PASS.
+expect: pass
+file: submission/src/main.txt
+| print("hello")

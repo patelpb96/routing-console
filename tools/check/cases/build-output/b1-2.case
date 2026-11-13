@@ -1,0 +1,11 @@
+rule: build-output
+why: RULES.md rule 3 says a name that merely contains one of the words (targets.md, rebuild.txt, distance.csv, build-notes.md) is PASS, because only a whole folder or file name counts.
+expect: pass
+file: submission/notes/targets.md
+| Target list for the week.
+file: submission/notes/rebuild.txt
+| Rebuild the cache next sprint.
+file: submission/notes/distance.csv
+| km,stop
+file: submission/notes/node_modules-readme.txt
+| Near-miss name, not the folder node_modules.

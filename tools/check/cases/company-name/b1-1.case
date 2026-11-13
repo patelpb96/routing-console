@@ -1,0 +1,9 @@
+rule: company-name
+why: Brief says do not publish a public repository naming the company, and RULES.md rule 8 makes a letter-case-insensitive hit with --public a FAIL.
+expect: fail
+company: Quillmere Labs
+public: yes
+file: repo/README.md
+| # Routing console
+| Built for the QUILLMERE LABS operations team.
+commit: init

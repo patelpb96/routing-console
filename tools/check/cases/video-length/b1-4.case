@@ -1,0 +1,7 @@
+rule: video-length
+why: RULES.md rule 11 says the outcome is always MANUAL whatever is on disk; session files with no answer file (rule 7 and rule 6 territory) must not change it.
+expect: manual
+file: submission/planning.jsonl
+| {"type":"user","text":"decompose the sample task list"}
+file: submission/testing.jsonl
+| {"type":"user","text":"run the checks and report"}

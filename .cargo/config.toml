@@ -1,0 +1,8 @@
+[alias]
+check-all = "run -q -p check-all --"
+
+# Windows only: link the C runtime statically. One Visual Studio Build Tools install on the
+# development machine ships libvcruntime.lib but not vcruntime.lib, so the default (dynamic)
+# link fails with LNK1104. Static linking needs no extra setup and has no effect on macOS or Linux.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

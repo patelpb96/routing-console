@@ -1,0 +1,7 @@
+rule: company-name
+why: RULES.md rule 8 searches every commit message, and a hit without --public is WARN, not FAIL.
+expect: warn
+company: Quillmere Labs
+file: repo/notes.txt
+| Routing notes for the first sprint.
+commit: Quillmere Labs contract kickoff

@@ -1,0 +1,14 @@
+rule: session-map
+why: RULES.md rule 7: a line naming no existing session file is FAIL; the answer names final-testing.jsonl but the only export is final-test.jsonl (brief: "Final testing and verification: <which session, and where>").
+expect: fail
+file: submission/planning.jsonl
+| {"type":"user","text":"decompose the routing console"}
+file: submission/correction.jsonl
+| {"type":"user","text":"the retry plan is wrong, stop"}
+file: submission/final-test.jsonl
+| {"type":"user","text":"run the tests and report"}
+file: SUBMISSION.md
+| Session map:
+| - Initial planning or decomposition: planning.jsonl, from the first message to the task list
+| - Most important correction or change of direction: correction.jsonl, where the retry plan is rejected
+| - Final testing and verification: final-testing.jsonl, the last 40 messages

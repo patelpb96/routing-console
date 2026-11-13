@@ -1,0 +1,8 @@
+rule: personal-info
+why: RULES.md rule 9 lists only local@domain.tld emails and home paths with a name after /Users, so a decorator, a handle without a domain and a bare /Users are not hits and the result is PASS.
+expect: pass
+file: submission/prose.md
+| @dataclass
+| Ping @dana_p about the routing queue.
+| Users can see the board.
+| Route the task to /Users

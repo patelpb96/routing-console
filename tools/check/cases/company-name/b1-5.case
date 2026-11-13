@@ -1,0 +1,8 @@
+rule: company-name
+why: RULES.md rule 8 searches every tracked file's path, so a name found in a tracked path with --public is FAIL.
+expect: fail
+company: Quillmere Labs
+public: yes
+file: repo/Quillmere Labs/plan.txt
+| Routing plan for sprint one.
+commit: init

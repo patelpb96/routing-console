@@ -1,0 +1,6 @@
+rule: session-jsonl
+why: RULES rule 5 says a .jsonl file that "holds only whitespace" fails, so a file of two blank lines is not a session export.
+expect: fail
+file: submission/session-empty.jsonl
+|
+|

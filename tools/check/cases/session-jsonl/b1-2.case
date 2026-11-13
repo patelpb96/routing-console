@@ -1,0 +1,6 @@
+rule: session-jsonl
+why: RULES rule 5 says a non-blank line must parse as one complete JSON value (RFC 8259), and a trailing comma before the closing brace is not valid JSON.
+expect: fail
+file: submission/session-planning.jsonl
+| {"speaker":"operator","text":"Route the finance task."}
+| {"speaker":"assistant","text":"Matched one contributor.",}

@@ -1,0 +1,5 @@
+rule: file-size
+why: RULES.md rule 2 says a file of exactly the limit is PASS ("Exactly the limit is `PASS`"), here 1000 bytes with --max-bytes 1000.
+expect: pass
+max-bytes: 1000
+bytes: submission/exact-limit.bin 1000

@@ -1,0 +1,10 @@
+rule: company-name
+why: RULES.md rule 8 searches only tracked files, so a name found only in an untracked file is PASS even with public set to yes.
+expect: pass
+company: Quillmere Labs
+public: yes
+file: repo/app.txt
+| fn main() {}
+untracked: repo/scratch-notes.txt
+| Quillmere Labs call notes, not for upload.
+commit: init

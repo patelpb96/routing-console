@@ -1,0 +1,3 @@
+rule: time-budget
+why: RULES.md rule 10 says a missing ledger file is WARN; this case creates no ledger.md, so WARN.
+expect: warn

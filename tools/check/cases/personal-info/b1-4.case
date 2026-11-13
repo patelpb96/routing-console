@@ -1,0 +1,5 @@
+rule: personal-info
+why: RULES.md rule 9 counts a home-folder path /Users/<name> as a hit, so WARN; the brief allows redacting filesystem paths.
+expect: warn
+file: submission/run-log.txt
+| Saved to /Users/dana/Projects/routing-console/out.txt

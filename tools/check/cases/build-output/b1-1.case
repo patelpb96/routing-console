@@ -1,0 +1,5 @@
+rule: build-output
+why: RULES.md rule 3 says any path component under the submission directory that is exactly node_modules fails, and the brief says to delete node_modules; a nested node_modules folder still counts.
+expect: fail
+file: submission/apps/web/packages/api/node_modules/left-pad/index.txt
+| module.exports = 1;

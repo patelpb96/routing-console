@@ -1,0 +1,17 @@
+rule: answer-template
+why: RULES.md rule 6 allows leading spaces before a heading, trims the text after Repository: before the https:// test, and only "<" followed by a letter is a placeholder, so PASS.
+expect: pass
+file: SUBMISSION.md
+| Repository:    https://example.com/routing-console
+| Walkthrough video: https://example.com/walkthrough-video
+|
+|   Agent setup:
+| Claude Code in the terminal, with planning and implementation sessions. The p < 0.05 threshold in the notes is prose.
+|
+|   Session map:
+| - Initial planning or decomposition: session 1, first 30 minutes.
+| - Most important correction or change of direction: session 2.
+| - Final testing and verification: session 3.
+|
+|   Intentional omissions:
+| - Authentication, because the exercise is a single-operator tool.

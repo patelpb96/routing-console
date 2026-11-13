@@ -1,0 +1,14 @@
+rule: session-map
+why: RULES.md rule 7 says to find the line containing the exact text "Most important correction or change of direction:"; the answer's line reads "Most important correction:", so that line is missing and the rule is FAIL (brief template line 116).
+expect: fail
+file: submission/planning.jsonl
+| {"type":"user","text":"decompose the routing console"}
+file: submission/correction.jsonl
+| {"type":"user","text":"the retry plan is wrong, stop"}
+file: submission/testing.jsonl
+| {"type":"user","text":"run the tests and report"}
+file: SUBMISSION.md
+| Session map:
+| - Initial planning or decomposition: planning.jsonl, from the first message to the task list
+| - Most important correction: correction.jsonl, where the retry plan is rejected
+| - Final testing and verification: testing.jsonl, the last 40 messages

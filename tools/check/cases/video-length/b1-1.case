@@ -1,0 +1,3 @@
+rule: video-length
+why: RULES.md rule 11 says "It cannot be read from disk. Always `MANUAL`", so an empty submission folder still gives MANUAL.
+expect: manual

@@ -1,0 +1,8 @@
+rule: company-name
+why: RULES.md rule 8 says that when no company name is supplied the result is MANUAL, whatever the repository holds.
+expect: manual
+public: yes
+file: repo/README.md
+| # Routing console
+| Public demo of task routing.
+commit: init

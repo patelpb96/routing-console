@@ -1,0 +1,5 @@
+rule: video-length
+why: RULES.md rule 3 makes build-output FAIL on a node_modules folder, but rule 11 says the outcome is always MANUAL; the brief's "delete node_modules and any build output" is rule 3's concern and must not change this one.
+expect: manual
+file: submission/node_modules/example-lib/index.js
+| module.exports = 1;

@@ -1,0 +1,7 @@
+rule: file-size
+why: RULES.md rule 2 is per file ("Every regular file ... must be at most `--max-bytes` bytes"), so three files of 600 bytes each under a 1000-byte limit are PASS even though they total 1800 bytes.
+expect: pass
+max-bytes: 1000
+bytes: submission/part-1.bin 600
+bytes: submission/part-2.bin 600
+bytes: submission/part-3.bin 600

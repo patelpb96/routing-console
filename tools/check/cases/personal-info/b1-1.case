@@ -1,0 +1,5 @@
+rule: personal-info
+why: RULES.md rule 9 says an email address (local@domain.tld) is a hit unless its local part is noreply or no-reply, and any hit is WARN; the brief allows redacting personal information.
+expect: warn
+file: submission/contact.md
+| Follow-up questions can go to dana.fictional@example.com.

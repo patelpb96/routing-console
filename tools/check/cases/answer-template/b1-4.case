@@ -1,0 +1,17 @@
+rule: answer-template
+why: RULES.md rule 6 fails a "<", then a letter, then text up to ">" on one line (not starting with http) as a placeholder left in; the template's "<a short description...>" line is still there, so FAIL.
+expect: fail
+file: SUBMISSION.md
+| Repository: https://example.com/routing-console
+| Walkthrough video: https://example.com/walkthrough-video
+|
+| Agent setup:
+| <a short description of your agentic development setup>
+|
+| Session map:
+| - Initial planning or decomposition: session 1, first 30 minutes.
+| - Most important correction or change of direction: session 2.
+| - Final testing and verification: session 3.
+|
+| Intentional omissions:
+| - Authentication, because the exercise is a single-operator tool.

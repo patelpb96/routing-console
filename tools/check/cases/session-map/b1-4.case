@@ -1,0 +1,14 @@
+rule: session-map
+why: RULES.md rule 7 says each line's file name must match the base name of a .jsonl file under the submission directory, not its path; sessions/build.jsonl matches submission/export/run-3/build.jsonl, so PASS (brief: "include their native exports", folders allowed via Attach folder).
+expect: pass
+file: submission/planning.jsonl
+| {"type":"user","text":"decompose the routing console"}
+file: submission/export/run-3/build.jsonl
+| {"type":"user","text":"the retry plan is wrong, stop"}
+file: submission/testing.jsonl
+| {"type":"user","text":"run the tests and report"}
+file: SUBMISSION.md
+| Session map:
+| - Initial planning or decomposition: planning.jsonl, from the first message to the task list
+| - Most important correction or change of direction: sessions/build.jsonl, where the retry plan is rejected
+| - Final testing and verification: testing.jsonl, the last 40 messages

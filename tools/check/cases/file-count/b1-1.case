@@ -1,0 +1,23 @@
+rule: file-count
+why: RULES.md rule 1 says 0 to 10 entries is PASS, and the brief says "attach up to 10 files"; exactly 10 is the boundary.
+expect: pass
+file: submission/f01.txt
+| one
+file: submission/f02.txt
+| one
+file: submission/f03.txt
+| one
+file: submission/f04.txt
+| one
+file: submission/f05.txt
+| one
+file: submission/f06.txt
+| one
+file: submission/f07.txt
+| one
+file: submission/f08.txt
+| one
+file: submission/f09.txt
+| one
+file: submission/f10.txt
+| one

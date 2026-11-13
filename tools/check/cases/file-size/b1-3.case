@@ -1,0 +1,7 @@
+rule: file-size
+why: RULES.md rule 2 applies to every regular file under the submission directory, recursively ("Under the submission directory" means recursively), so a 1001-byte file nested in two folders is FAIL against 1000.
+expect: fail
+max-bytes: 1000
+dir: submission/exports
+dir: submission/exports/week1
+bytes: submission/exports/week1/nested.bin 1001

@@ -1,0 +1,8 @@
+[package]
+name = "check-all"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Runs the repository gate: fmt, clippy, tests, repo rules"
+
+[dependencies]

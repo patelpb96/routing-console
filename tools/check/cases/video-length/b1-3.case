@@ -1,0 +1,6 @@
+rule: video-length
+why: RULES.md rule 11 says the outcome is always MANUAL whatever is on disk; the leftover template placeholder is rule 6's concern (answer-template), so it must not change this rule's outcome.
+expect: manual
+file: SUBMISSION.md
+| Repository: https://example.com/sample-routing
+| Walkthrough video: <Loom link, 10 minutes max>

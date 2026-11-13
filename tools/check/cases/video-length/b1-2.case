@@ -1,0 +1,6 @@
+rule: video-length
+why: RULES.md rule 11 says the outcome is always MANUAL because the video cannot be read from disk, so a filled walkthrough link (brief: "Loom link, 10 minutes max") still gives MANUAL.
+expect: manual
+file: SUBMISSION.md
+| Repository: https://example.com/sample-routing
+| Walkthrough video: https://example.com/walkthrough-video

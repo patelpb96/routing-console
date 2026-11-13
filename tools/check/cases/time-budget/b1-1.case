@@ -1,0 +1,9 @@
+rule: time-budget
+why: RULES.md rule 10 warns at 270 or more; the Min column sums 100+100+69 = 269, so PASS.
+expect: pass
+file: ledger.md
+| | Card | Min |
+| |---|---|
+| | intake | 100 |
+| | routing | 100 |
+| | docs | 69 |

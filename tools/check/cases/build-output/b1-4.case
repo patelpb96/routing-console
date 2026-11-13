@@ -1,0 +1,4 @@
+rule: build-output
+why: RULES.md rule 3 fails when any file's name ends in .db-wal, even though it does not end in .db; the folder named db is not in the forbidden list, so only the file matters.
+expect: fail
+bytes: submission/db/state.db-wal 32

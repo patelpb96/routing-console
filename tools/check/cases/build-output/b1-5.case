@@ -1,0 +1,5 @@
+rule: build-output
+why: RULES.md Definitions say name comparisons for path components ignore letter case, so the folder Target is exactly target under rule 3 and FAILs.
+expect: fail
+file: submission/Target/app.txt
+| compiled output

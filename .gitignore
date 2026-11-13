@@ -1,0 +1,11 @@
+# Build output and local state. The submission checker fails if any of these are packed.
+target/
+node_modules/
+dist/
+build/
+*.db
+*.db-wal
+*.db-shm
+
+# Packed submission and raw session exports are assembled here, never committed.
+submission/

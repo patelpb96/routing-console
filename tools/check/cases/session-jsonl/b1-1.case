@@ -1,0 +1,8 @@
+rule: session-jsonl
+why: RULES rule 5 says "Blank and whitespace-only lines are skipped", so valid JSON records separated by blank lines pass.
+expect: pass
+file: submission/session-planning.jsonl
+| {"speaker":"operator","text":"Route the finance task."}
+|
+| {"speaker":"assistant","text":"Matched one contributor.","tool":null}
+|

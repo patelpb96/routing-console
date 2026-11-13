@@ -1,0 +1,9 @@
+rule: time-budget
+why: RULES.md rule 10 sums only tables whose last header cell is Min; this table ends in Minutes, so there is no such table and the rule is WARN (the numbers total 150+200+100 = 450, and a checker that sums them still reaches WARN).
+expect: warn
+file: ledger.md
+| | Card | Minutes |
+| |---|---|
+| | intake | 150 |
+| | routing | 200 |
+| | docs | 100 |

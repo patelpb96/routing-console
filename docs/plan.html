@@ -1,0 +1,379 @@
+<title>Routing Console Build Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+/* Layout: one reading column, diagrams and tables scroll inside their own frames. Square corners throughout. */
+:root {
+  --bg: #f2f4f6;
+  --surface: #ffffff;
+  --ink: #17212b;
+  --muted: #566573;
+  --line: #cfd6dd;
+  --accent: #0a6a86;
+  --unknown: #a85f00;
+  --ok: #1f7a4d;
+  --bad: #b3362b;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", Consolas, "Courier New", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151b; --surface: #161e26; --ink: #e1e8ee; --muted: #93a1ae; --line: #2b3742;
+    --accent: #62c3e0; --unknown: #f0ae45; --ok: #5fca94; --bad: #f08a7e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151b; --surface: #161e26; --ink: #e1e8ee; --muted: #93a1ae; --line: #2b3742;
+  --accent: #62c3e0; --unknown: #f0ae45; --ok: #5fca94; --bad: #f08a7e; color-scheme: dark;
+}
+* { box-sizing: border-box; border-radius: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+}
+.page { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 44px; }
+header { display: flex; flex-direction: column; gap: 14px; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 2.3rem; line-height: 1.1; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.5rem; line-height: 1.2; margin: 0; text-wrap: balance; }
+h3 { font-size: 1rem; font-weight: 600; margin: 0; }
+p { margin: 0; max-width: 68ch; }
+section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.08rem; color: var(--ink); }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--surface); border: 1px solid var(--line); padding: 0 4px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0; border: 1px solid var(--line); background: var(--surface); }
+.facts div { padding: 12px 14px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 -1px -1px 0; min-width: 0; }
+.facts dt { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.facts dd { margin: 4px 0 0; font-weight: 500; }
+dl { margin: 0; }
+.frame { border: 1px solid var(--line); background: var(--surface); overflow-x: auto; padding: 16px; }
+.frame pre.mermaid { margin: 0; min-width: 560px; font-family: var(--font-body); }
+.tablewrap { border: 1px solid var(--line); background: var(--surface); overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; white-space: nowrap; }
+td.nowrap { white-space: nowrap; }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 0.72rem; padding: 1px 7px; border: 1px solid currentColor; white-space: nowrap; }
+.tag.fail { color: var(--bad); }
+.tag.warn { color: var(--unknown); }
+.tag.manual { color: var(--muted); }
+.tag.tier { color: var(--accent); }
+.decision { border: 1px solid var(--line); background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.decision .eyebrow { color: var(--unknown); }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; max-width: 68ch; }
+/* Elapsed-time scale: 0 to 30 seconds drawn to scale, 5/15/10 */
+.scale { border: 1px solid var(--line); background: var(--surface); padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.bar { display: flex; height: 26px; border: 1px solid var(--line); }
+.bar span { display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.7rem; overflow: hidden; white-space: nowrap; min-width: 0; }
+.bar .early { flex: 5; background: var(--bg); color: var(--muted); }
+.bar .normal { flex: 15; background: var(--accent); color: var(--surface); }
+.bar .past { flex: 10; background: var(--unknown); color: var(--surface); }
+.ticks { display: flex; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); }
+.ticks span:nth-child(1) { flex: 5; } .ticks span:nth-child(2) { flex: 15; } .ticks span:nth-child(3) { flex: 10; }
+.ticks span:last-child { flex: 0; white-space: nowrap; }
+pre.tree { margin: 0; font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.5; white-space: pre; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="page">
+
+<header>
+  <span class="eyebrow">Take-home exercise · plan for inspection · 12 Nov 2026</span>
+  <h1>Routing Console Build Plan</h1>
+  <p class="lede">An operator console that assigns expert tasks to contributors through a routing engine that sometimes never answers. This page covers two routing systems: the one in the product, and the one that decides which agent does which piece of the build.</p>
+  <dl class="facts">
+    <div><dt>Status</dt><dd>Plan approved. No code yet.</dd></div>
+    <div><dt>Time box</dt><dd>4 h 45 of the 5 h allowed</dd></div>
+    <div><dt>Stack</dt><dd>Rust, axum, SQLite, plain JS</dd></div>
+    <div><dt>Agents</dt><dd>Haiku fetches, Opus 5.5 builds</dd></div>
+  </dl>
+</header>
+
+<section>
+  <span class="eyebrow">Workflow 1 of 3</span>
+  <h2>How work moves between agents, scripts and you</h2>
+  <p>Borrowed from an earlier multi-agent project: a small desk hierarchy, pages fetched once and saved, and rules in code that decide what gets through. A model never answers a pass or fail question that a script can answer.</p>
+  <div class="frame"><pre class="mermaid">
+flowchart TD
+  brief["Assessment brief"] --> plan["Orchestrator writes plan and task cards"]
+  plan --> approve{"Author approves?"}
+  approve -- "changes" --> plan
+  approve -- "yes" --> card["Next task card"]
+  card --> kind{"What does the card need?"}
+  kind -- "a web page" --> haiku["Research desk, Haiku: fetch once, save to research/"]
+  haiku --> card
+  kind -- "routine code" --> high["Coder, Opus 5.5 Medium"]
+  kind -- "concurrency or recovery code" --> max["Coder, Opus 5.5 Medium, slice S2"]
+  high --> gates{"Gates pass? fmt, clippy, tests, file checks"}
+  max --> gates
+  gates -- "no" --> triage{"Second pass: does it block a workable version?"}
+  triage -- "yes" --> fix["Correction card"]
+  triage -- "no, log as deferred" --> review
+  fix --> kind
+  gates -- "yes" --> review{"Diff matches the card's contract?"}
+  review -- "no" --> fix
+  review -- "yes" --> ledger["Ledger row and commit"]
+  ledger --> more{"Slices left?"}
+  more -- "yes" --> card
+  more -- "no" --> verify["Browser run: four use cases plus a restart"]
+  verify --> pack{"Submission checks pass?"}
+  pack -- "no" --> fix
+  pack -- "yes" --> human["Author records the Loom and submits"]
+  </pre></div>
+
+  <h3>The second pass on a failed gate</h3>
+  <p>A failed gate does not start a fix on its own. The orchestrator first sorts the failure by one written rule, so small findings cannot eat the five hours.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Sorted as</th><th>What counts</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td class="nowrap"><span class="tag fail">blocks</span></td><td>The build breaks, a test or invariant fails, one of the four use cases is wrong, or a file rule from the brief fails</td><td>Correction card, with the gate output attached as it was printed</td></tr>
+      <tr><td class="nowrap"><span class="tag warn">deferred</span></td><td>Lint and style warnings, the 400-line limit, and edge cases an operator would rarely meet outside the four use cases</td><td>One line in the ledger. Work moves on to review.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Deferred items are picked up in S5 only if time is left. Any still open at the end are listed in the README as known gaps, so nothing is hidden.</p>
+
+  <h3>Who is on the desk</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Role</th><th>Tier it replaces</th><th>Runs as</th><th>May do</th><th>May not do</th></tr></thead>
+    <tbody>
+      <tr><td>Orchestrator</td><td>Editor (was Opus)</td><td><span class="tag tier">Fable, this session</span></td><td>Plan, write task cards, read diffs, run gates, drive the browser</td><td>Write product code beyond one-line fixes</td></tr>
+      <tr><td>Hard-slice coder</td><td>Editor-grade work (was Opus)</td><td><span class="tag tier">Opus 5.5 Medium</span></td><td>Slice S2 only: late returns, restart, invariants</td><td>Search the web, touch files outside its card</td></tr>
+      <tr><td>Coder</td><td>Senior (was Sonnet)</td><td><span class="tag tier">Opus 5.5 Medium</span></td><td>Slices S0, S1, S3, S4</td><td>Search the web, touch files outside its card</td></tr>
+      <tr><td>Research desk</td><td>Reporter</td><td><span class="tag tier">Haiku</span></td><td>Fetch pages, save them to <code>research/</code> with the URL</td><td>Write code, edit any other file</td></tr>
+      <tr><td>Case writers</td><td>Reporter</td><td><span class="tag tier">Haiku, in parallel</span></td><td>Write test cases for the file rules as data files, five per rule per batch</td><td>Write code, change the checker</td></tr>
+      <tr><td>Gates</td><td>Publish rules</td><td><span class="tag manual">scripts, no model</span></td><td>Report pass or fail</td><td>Start a fix on their own. Each failure gets the second pass first.</td></tr>
+      <tr><td>Author</td><td>Publisher</td><td><span class="tag manual">you</span></td><td>Approve the plan, settle product decisions, record, submit</td><td></td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Every coding card runs on the same model and effort. The hard slice gets a stricter gate, not a different model. Tool access is structural: coders get no web tools and the research desk gets no write access to code, so a fetched page cannot steer the build. I am not running that project's own pipeline, because it is tuned for a different job and its child sessions would land outside this project's exports.</p>
+  <p class="muted">One ledger file, <code>docs/agent-ledger.md</code>, gets a row per card: who ran it, at what effort, what the gate said, what was sent back. The session map in your submission is read straight off that file.</p>
+</section>
+
+<section>
+  <span class="eyebrow">The product</span>
+  <h2>What the operator sees when things do not go to plan</h2>
+  <p>The hard part of the brief is a request that may be slow or may be dead, with no way to tell. The design rule: the app never claims to know. It shows how long a request has been outstanding against the engine's normal window and leaves the call to the operator.</p>
+  <div class="scale" role="img" aria-label="Elapsed time scale: under 5 seconds is early, 5 to 20 seconds is the normal window, beyond 20 seconds is past the normal window">
+    <div class="bar"><span class="early">early</span><span class="normal">normal window</span><span class="past">past window</span></div>
+    <div class="ticks"><span>0 s</span><span>5 s</span><span>20 s</span><span>30 s</span></div>
+    <p class="muted">Past window is computed from the clock each time the page draws. It is never stored as a state, so it needs no timer and is still correct after a restart.</p>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Situation</th><th>What the app does</th><th>How the operator can see it</th></tr></thead>
+    <tbody>
+      <tr><td>Request still pending</td><td>Nothing automatic. No timeout turns it into a failure.</td><td>Live elapsed clock on the scale above. High priority sorts to the top of an attention queue.</td></tr>
+      <tr><td>Operator steps in while pending</td><td>Their choice applies at once. The old request is marked superseded but stays on record.</td><td>History line with the reason code they picked.</td></tr>
+      <tr><td>Superseded request returns later</td><td>Result is recorded and not applied. The check and the write are one SQLite transaction.</td><td>History line: engine suggested X after you assigned Y.</td></tr>
+      <tr><td>Two requests pick the same contributor</td><td>The second finds the contributor full when it lands. Task goes to needs attention.</td><td>Reason shown on the task: selection no longer available.</td></tr>
+      <tr><td>Contributor declines, or the offer fails</td><td>Task goes to needs attention with the reason kept.</td><td>One-click choices: route again without that person, assign by hand, or close.</td></tr>
+      <tr><td>Page refresh</td><td>The browser holds no state. It redraws from one server snapshot.</td><td>Nothing changes on screen.</td></tr>
+      <tr><td>Server restart</td><td>Tasks, requests and history are on disk. The simulated engine reloads its own schedule, like an outside service would.</td><td>History line on each affected task: server restarted while this request was outstanding.</td></tr>
+      <tr><td>Two tabs act on one task</td><td>Each action carries the task version it saw. A stale one is refused.</td><td>Message: this task changed 2 s ago, here is the current state.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <span class="eyebrow">Workflow 2 of 3</span>
+  <h2>Life of a task</h2>
+  <p>Six stored states. Routing requests and assignments are separate records, so one task can have several attempts and its full story stays readable.</p>
+  <div class="frame"><pre class="mermaid">
+stateDiagram-v2
+  state "Needs attention" as NeedsAttention
+  [*] --> Unassigned: create
+  Unassigned --> Routing: submit
+  Routing --> Offered: engine returns a match
+  Routing --> NeedsAttention: engine returns no match
+  Routing --> Offered: operator assigns by hand
+  Routing --> Routing: operator routes again
+  Routing --> Unassigned: operator cancels routing
+  Offered --> Assigned: contributor accepts
+  Offered --> NeedsAttention: declined or offer failed
+  Offered --> Offered: operator reassigns
+  NeedsAttention --> Routing: operator routes again
+  NeedsAttention --> Offered: operator assigns by hand
+  NeedsAttention --> Closed: operator closes
+  Assigned --> Offered: operator reassigns
+  Assigned --> [*]
+  Closed --> [*]
+  </pre></div>
+  <p class="muted">The rule that a task has at most one active assignee is enforced by a partial unique index in SQLite, so a code bug cannot break it. Every transition writes its history event in the same transaction as the state change.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Workflow 3 of 3</span>
+  <h2>The late return, step by step</h2>
+  <p>This is the non-happy path I would show in the Loom. A scenario picker makes it repeatable: the request is told to return at 26 seconds.</p>
+  <div class="frame"><pre class="mermaid">
+sequenceDiagram
+  participant O as Operator
+  participant A as App
+  participant E as Routing engine
+  O->>A: Submit high priority task
+  A->>E: Request 1
+  Note over A: Routing. Elapsed clock starts.
+  Note over A: 20 s. Past normal window. Flagged, not failed.
+  O->>A: Assign by hand, reason engine too slow
+  Note over A: Request 1 superseded. Task offered to the operator's pick.
+  E-->>A: Request 1 returns a different contributor
+  Note over A: Recorded in history. Not applied.
+  A-->>O: History shows late result ignored
+  </pre></div>
+</section>
+
+<section>
+  <span class="eyebrow">Tasks and data</span>
+  <h2>Seed data that fits the reviewer's business</h2>
+  <p>The research desk read the company's public pages. They run an expert marketplace for market research and AI training work: surveys, interviews, ongoing hourly projects, and on the AI side evals, red-teaming and annotation. The seed set uses those kinds of work.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Seed task</th><th>Needs</th><th>Priority</th><th>Starts as</th></tr></thead>
+    <tbody>
+      <tr><td>Grade 40 model answers on hospital discharge planning</td><td>Healthcare</td><td>High</td><td>Routing</td></tr>
+      <tr><td>Red-team a tax-advice assistant, 25 prompts</td><td>Finance</td><td>High</td><td>Needs attention, declined</td></tr>
+      <tr><td>30-minute interview on month-end close</td><td>Finance</td><td>Normal</td><td>Assigned</td></tr>
+      <tr><td>Label 300 support tickets by root cause</td><td>Data analysis</td><td>Normal</td><td>Offered</td></tr>
+      <tr><td>Survey on warehouse shift scheduling tools</td><td>Operations</td><td>Normal</td><td>Unassigned</td></tr>
+      <tr><td>Annotate dairy-herd sensor clips for lameness</td><td>Veterinary</td><td>High</td><td>Needs attention, no match</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li>Eight fictional contributors, each with one to three areas and room for one or two tasks. Nobody covers veterinary, so a no-match case exists from the first screen.</li>
+    <li>Seed history is produced by replaying real commands against a fake clock, so the seeded timelines are made by the same code as live ones.</li>
+    <li>Every operator override stores a reason code: engine too slow, better fit known, contributor unavailable, priority, other. For an AI company this is the valuable data. Each override is a labelled disagreement with the engine that could later grade a real matcher.</li>
+    <li>Simulation controls sit in their own panel, apart from operator actions: engine outcome per task (auto, fast match, slow match, no match, never returns), contributor reply, a seed, and reset.</li>
+  </ul>
+</section>
+
+<section>
+  <span class="eyebrow">Stack and shape</span>
+  <h2>One binary, one command</h2>
+  <p><code>cargo run</code> starts the server, creates the database and serves the page. There is no Node step, so there is no <code>node_modules</code> to forget when packing. Verified on this machine: Rust 1.99.1 with the MSVC build tools. Crate versions the research desk read from crates.io: axum 0.8.9, tokio 1.54.1, rusqlite 0.42.0.</p>
+  <div class="frame"><pre class="tree">routing-console/
+  src/domain.rs    pure state machine: (state, command) to events or a refusal. No IO.
+  src/store.rs     SQLite. One connection behind one lock. One transaction per command.
+  src/engine.rs    RoutingEngine trait and the seeded simulator. Owns its own schedule table.
+  src/app.rs       load, decide, persist, notify
+  src/http.rs      JSON routes, server-sent events, embedded static files
+  web/             index.html, app.js, style.css. One render function from one snapshot.
+  tests/           transition table, random command runs against invariants, four use cases on paused time
+  tools/check/     the file and submission checks below. Standard library only.
+  docs/            agent-ledger.md, decisions, research/ with saved pages</pre></div>
+  <ul>
+    <li>All writes go through one lock and one transaction. There is no concurrent mutation to reason about, which keeps the explanation short.</li>
+    <li>The simulator decides each outcome from a hash of the seed and the request id, so results do not depend on the order requests happen to run in.</li>
+    <li>Timing tests use tokio's paused clock. Twenty seconds of waiting runs in milliseconds and gives the same answer every time.</li>
+  </ul>
+</section>
+
+<section>
+  <span class="eyebrow">Deterministic checks</span>
+  <h2>File rules, taken from the brief as written</h2>
+  <p>A small Rust program, <code>cargo run -p check -- submission/</code>, prints one line per rule and exits non-zero on any failure. It ships with fixtures, including a planted fake key, so the checks are themselves tested.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>The brief says</th><th>Check</th><th>Level</th></tr></thead>
+    <tbody>
+      <tr><td>Up to 10 files</td><td>File count in <code>submission/</code> is 10 or fewer</td><td class="nowrap"><span class="tag fail">fail</span></td></tr>
+      <tr><td>Up to 100 MB each</td><td>Every file is at most 100,000,000 bytes, the stricter reading of 100 MB</td><td class="nowrap"><span class="tag fail">fail</span></td></tr>
+      <tr><td>Delete node_modules and build output</td><td>No path contains <code>node_modules</code>, <code>target</code>, <code>dist</code> or <code>build</code>; no <code>.db</code> file</td><td class="nowrap"><span class="tag fail">fail</span></td></tr>
+      <tr><td>Remove API keys, tokens and passwords</td><td>Scan every text file for known key prefixes, private-key headers, bearer headers and <code>password=</code></td><td class="nowrap"><span class="tag fail">fail</span></td></tr>
+      <tr><td>Native session exports</td><td>Session files end in <code>.jsonl</code>, are not empty, and every line parses as JSON</td><td class="nowrap"><span class="tag fail">fail</span></td></tr>
+      <tr><td>Fill in the answer template</td><td>All five headings present, no <code>&lt;placeholder&gt;</code> left, both links start with <code>https://</code></td><td class="nowrap"><span class="tag fail">fail</span></td></tr>
+      <tr><td>Session map with three entries</td><td>Each of the three lines names a session file that exists in <code>submission/</code></td><td class="nowrap"><span class="tag fail">fail</span></td></tr>
+      <tr><td>Do not publish a public repo naming the company or the exercise</td><td>Search tracked files and commit messages for the company name</td><td class="nowrap"><span class="tag fail">fail if public</span></td></tr>
+      <tr><td>May redact personal information and paths</td><td>List email addresses and home-folder paths found in exports</td><td class="nowrap"><span class="tag warn">warn</span></td></tr>
+      <tr><td>No more than 5 hours</td><td>Sum the time column of the ledger; warn from 4 h 30</td><td class="nowrap"><span class="tag warn">warn</span></td></tr>
+      <tr><td>Loom of 10 minutes at most</td><td>Cannot be read from disk. Printed as a line for you to tick.</td><td class="nowrap"><span class="tag manual">manual</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Three repo rules are mine and not from the brief: tracked files must have an allowed extension, no tracked file over 1 MB, and no source file over 400 lines so every file stays explainable on camera. These run with fmt, clippy and the tests in one <code>check-all</code> command. My three rules and clippy only warn. Formatting is applied automatically instead of being checked. The build, the tests and the brief's own file rules are the ones that block.</p>
+
+  <h3>How every row gets its test cases</h3>
+  <p>Each of the 11 rows above is tested in batches of five. Haiku agents write the cases, one agent per row, all in parallel. A case is data, not code: the files to create, the outcome the row should give, and one line saying why. A single Opus coder is the only one who writes or changes the checker.</p>
+  <div class="frame"><pre class="mermaid">
+flowchart LR
+  rows["11 rules"] --> gen["Haiku, one per rule, in parallel: 5 cases each"]
+  gen --> rev{"Is each expected outcome right?"}
+  rev -- "no" --> drop["Fix or drop the case, with a note"]
+  rev -- "yes" --> run["Run the batch against the checker"]
+  drop --> run
+  run --> res{"All 5 match for this rule?"}
+  res -- "no" --> opus["Single Opus coder edits the checker"]
+  opus --> gen
+  res -- "yes" --> done["Rule closed, cases kept as regression tests"]
+  </pre></div>
+  <ul>
+    <li>I review every case before it runs. A case whose expected outcome misreads the brief is fixed or dropped, so the checker is never bent to fit a wrong test.</li>
+    <li>A rule closes when a fresh batch of five all match. Any miss means the Opus coder edits the checker and that rule gets five new cases.</li>
+    <li>Every case and its result is written to <code>docs/check-cases.md</code>: rule, batch, what was set up, expected, actual, and what was done about it.</li>
+    <li>Limit of three batches per rule. Anything still failing then goes through the second-pass rule: fixed if it blocks, logged if not.</li>
+  </ul>
+  <p class="muted">The kind of bug this is meant to catch: a key scan that looks for <code>sk-</code> would flag the word <code>task-routing</code> in every file. Or the 10-file count: does a folder of session files count as one item or as each file inside it? The brief says a folder is sent as one zip, so the cases pin that reading down.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Build order</span>
+  <h2>Five slices, each closed by a gate</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Slice</th><th>What exists at the end</th><th>Coder</th><th>Closed by</th><th>Box</th></tr></thead>
+    <tbody>
+      <tr><td class="nowrap">S0 Gates first</td><td>Workspace, check tool, Haiku-written cases for all 11 rules, <code>check-all</code></td><td class="nowrap">Opus 5.5 Medium</td><td>Every rule has a clean batch of five cases</td><td class="nowrap">0:35</td></tr>
+      <tr><td class="nowrap">S1 Tracer</td><td>One task goes create, route, offer, accept, on real SQLite, shown on a bare page</td><td class="nowrap">Opus 5.5 Medium</td><td>Happy-path test on paused time</td><td class="nowrap">0:45</td></tr>
+      <tr><td class="nowrap">S2 Unresolved</td><td>Never-returning requests, intervention, late returns, restart, version checks</td><td class="nowrap">Opus 5.5 Medium</td><td>Random command runs never break the invariants</td><td class="nowrap">0:50</td></tr>
+      <tr><td class="nowrap">S3 Recovery</td><td>Decline, failed offer, no match, reason codes, history</td><td class="nowrap">Opus 5.5 Medium</td><td>Use-case tests three and four</td><td class="nowrap">0:35</td></tr>
+      <tr><td class="nowrap">S4 Console</td><td>Attention queue, elapsed scale, history drawer, simulation panel</td><td class="nowrap">Opus 5.5 Medium</td><td>Browser run in both themes and at phone width</td><td class="nowrap">0:40</td></tr>
+      <tr><td class="nowrap">S5 Verify and pack</td><td>README with decisions and omissions, filled template, exports</td><td class="nowrap">Orchestrator</td><td>Submission checks all pass</td><td class="nowrap">0:30</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">With this planning session at 0:30 and your Loom at 0:20, the total is 4 h 45. S3 and S4 touch different folders, so they can run side by side once S2 fixes the snapshot shape, which buys back about half an hour.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Your calls</span>
+  <h2>Three decisions, all settled</h2>
+  <div class="stack">
+    <div class="decision">
+      <span class="eyebrow">Decision 1 · model ladder · settled</span>
+      <p>Every coding slice, S0 to S4, runs on an Opus 5.5 subagent at medium effort. Haiku does all fetching. This session plans, reviews diffs and runs the gates.</p>
+      <p class="muted">S2 keeps its own card and its stricter gate, the random command runs against the invariants. If it fails that gate twice, raising the effort on that one card is a one-word change.</p>
+    </div>
+    <div class="decision">
+      <span class="eyebrow">Decision 2 · front end · settled</span>
+      <p>Plain JavaScript served by the Rust binary. One command to run, nothing to install, and the whole front end is one render function you can walk through on camera.</p>
+      <p class="muted">Not chosen: Svelte with Vite. It gives typed components and costs a second toolchain, a build step for reviewers, and about 30 minutes of the box.</p>
+    </div>
+    <div class="decision">
+      <span class="eyebrow">Decision 3 · where the build runs · settled</span>
+      <p>The folder <code>Projects/routing-console</code> now exists as an empty git repository holding the brief, this plan, the research notes and the agent ledger. The build runs in a fresh session rooted there. This session is exported as the planning session.</p>
+      <p class="muted">This session was opened in your home folder, so its export may carry your global instructions and memory index. The redaction check will list what it finds before anything is attached. The folder name leaves the company out on purpose.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Draft for the written answer</span>
+  <h2>Left out on purpose</h2>
+  <ul>
+    <li>Work after acceptance. The brief says routing is complete once a contributor accepts, so there is no in-progress or done tracking.</li>
+    <li>Automatic retries and timeouts. A pending request is unknown, and the app does not turn unknown into failed. A bounded retry policy is the first thing I would add next.</li>
+    <li>Contributor screens and sign-in. Contributor replies come from the simulation panel. There is one operator and no accounts.</li>
+    <li>A real matching algorithm. The simulator picks the least loaded eligible contributor. The brief says matching quality is not the point.</li>
+    <li>Deployment, multiple servers, and an external queue. One process and one SQLite file.</li>
+  </ul>
+  <p class="muted">Stretch, only if S0 to S4 land inside their boxes: an export of overrides as JSON lines, about 15 minutes.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Sources</span>
+  <h2>What the research desk read</h2>
+  <p class="muted">One Haiku agent, 33 tool calls, about 70 seconds. It fetched the company's home, about, researchers, AI, careers, expert docs and developer docs pages, plus crates.io and the axum server-sent events docs. Its fetch tool returns summaries, so nothing here is a verbatim quote. No tech stack is named on any page it reached, and it found no launch article. Before coding starts, the pages are fetched again and saved under <code>research/</code> so coders read files and not the web.</p>
+</section>
+
+</div>

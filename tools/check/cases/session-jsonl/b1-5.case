@@ -1,0 +1,8 @@
+rule: session-jsonl
+why: RULES rule 5 passes when every file in a sessions folder ends in .jsonl, and extension comparison ignores letter case, so Final-Check.JSONL in a nested subfolder passes.
+expect: pass
+dir: submission/sessions/archive
+file: submission/sessions/planning.jsonl
+| {"speaker":"operator","text":"Split the task into two steps."}
+file: submission/sessions/archive/Final-Check.JSONL
+| {"speaker":"assistant","text":"All checks passed."}
